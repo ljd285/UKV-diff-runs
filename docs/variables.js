@@ -8,7 +8,8 @@
 //   factor, offset    Conversión del valor del fichero: mostrado = bruto * factor + offset
 //                     (las diferencias solo usan factor).
 //   decimals          Decimales al mostrar valores y estadísticas.
-//   scales, scale     Escalas ± disponibles para la vista de diferencia y la elegida por defecto (en `unit`).
+//   diffScale         Escala FIJA de la diferencia: ±diffScale en `unit` (para kind "vector": de 0 a diffScale).
+//   range             Rango FIJO [min, max] de los mapas de cada salida, en la unidad mostrada (viewUnit para el viento).
 //   thresh            Umbral para la estadística "celdas con |Δ| > umbral" (en `unit`).
 //   pos, neg          Texto de "A es más ..." para diferencias positivas / negativas.
 //   leads             "any": existe cada hora de 0 a 120 h.
@@ -21,8 +22,6 @@
 //   files             Para kind != "scalar": {dir, speed} en lugar de `file`.
 //   viewUnit/viewDecimals  Unidad y decimales de las vistas A/B y del tooltip si difieren de `unit` (viento: m/s).
 //   minSpeed          (wdiff) velocidad mínima (m/s) en ambas pasadas para dibujar la diferencia de dirección.
-//   seq               Rango de la vista secuencial (A y B): "auto" (percentiles 2–98 de ambas pasadas),
-//                     o {lo, hi}; hi puede ser "p99" (percentil 99,5 con mínimo `hiMin`) o un número.
 //
 // Cómo localizar variables nuevas: `node scripts/explore-bucket.mjs` lista las variables de un ciclo
 // con su rango de alcances; el nombre interno y las unidades se ven abriendo un fichero (h5wasm/netCDF4).
@@ -35,7 +34,7 @@ export const GROUPS = [
   { id: "precip", label: "Precipitación" },
 ];
 
-const KELVIN = { factor: 1, offset: -273.15, unit: "°C", decimals: 1, scales: [1, 2, 3, 5, 8], scale: 3, thresh: 1, pos: "más cálida", neg: "más fría" };
+const KELVIN = { factor: 1, offset: -273.15, unit: "°C", decimals: 1, diffScale: 3, range: [-5, 25], thresh: 1, pos: "más cálida", neg: "más fría" };
 
 export const VARIABLES = {
   t:    { ...KELVIN, label: "Temperatura a 1,5 m", group: "temp", file: "temperature_at_screen_level", leads: "any" },
@@ -45,55 +44,56 @@ export const VARIABLES = {
 
   pmsl: {
     label: "Presión a nivel del mar", group: "pres", file: "pressure_at_mean_sea_level", leads: "std",
-    unit: "hPa", factor: 0.01, offset: 0, decimals: 1, scales: [0.5, 1, 2, 4, 8], scale: 2, thresh: 1,
+    unit: "hPa", factor: 0.01, offset: 0, decimals: 1, diffScale: 2, range: [980, 1040], thresh: 1,
     pos: "más alta", neg: "más baja",
   },
 
   wind: {
     label: "Velocidad del viento", group: "wind", file: "wind_speed_at_10m", leads: "std",
-    unit: "m/s", factor: 1, offset: 0, decimals: 1, scales: [1, 2, 3, 5, 10], scale: 3, thresh: 2,
-    pos: "más fuerte", neg: "más débil", seq: { lo: 0, hi: "p99", hiMin: 5 },
+    unit: "m/s", factor: 1, offset: 0, decimals: 1, diffScale: 3, range: [0, 25], thresh: 2,
+    pos: "más fuerte", neg: "más débil",
   },
   gust: {
     label: "Racha de viento", group: "wind", file: "wind_gust_at_10m", leads: "std",
-    unit: "m/s", factor: 1, offset: 0, decimals: 1, scales: [1, 2, 3, 5, 10], scale: 3, thresh: 2,
-    pos: "más fuerte", neg: "más débil", seq: { lo: 0, hi: "p99", hiMin: 5 },
+    unit: "m/s", factor: 1, offset: 0, decimals: 1, diffScale: 3, range: [0, 35], thresh: 2,
+    pos: "más fuerte", neg: "más débil",
   },
 
   wdir: {
     label: "Dirección del viento (diferencia)", group: "wind", kind: "wdiff", leads: "std",
     files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
     unit: "°", factor: 1, offset: 0, decimals: 0, viewUnit: "m/s", viewDecimals: 1,
-    scales: [15, 30, 45, 90], scale: 30, thresh: 30, minSpeed: 1.5,
-    pos: "rolada en sentido horario", neg: "rolada en sentido antihorario", seq: { lo: 0, hi: "p99", hiMin: 5 },
+    diffScale: 30, range: [0, 25], thresh: 30, minSpeed: 1.5,
+    pos: "rolada en sentido horario", neg: "rolada en sentido antihorario",
   },
   wvec: {
     label: "Viento (vectores A y B)", group: "wind", kind: "vector", leads: "std",
     files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
     unit: "m/s", factor: 1, offset: 0, decimals: 1,
-    scales: [1, 2, 3, 5, 10], scale: 3, thresh: 2, pos: "", neg: "", seq: { lo: 0, hi: "p99", hiMin: 5 },
+    diffScale: 3, range: [0, 25], thresh: 2, pos: "", neg: "",
   },
 
   rh: {
     label: "Humedad relativa", group: "moist", file: "relative_humidity_at_screen_level", leads: "std",
-    unit: "%", factor: 100, offset: 0, decimals: 0, scales: [5, 10, 20, 30], scale: 10, thresh: 10,
-    pos: "más húmeda", neg: "más seca", seq: { lo: 0, hi: 100 },
+    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 10, range: [0, 100], thresh: 10,
+    pos: "más húmeda", neg: "más seca",
   },
   cloud: {
     label: "Nubosidad total", group: "moist", file: "cloud_amount_of_total_cloud", leads: "std",
-    unit: "%", factor: 100, offset: 0, decimals: 0, scales: [10, 25, 50, 100], scale: 25, thresh: 25,
-    pos: "más nublada", neg: "más despejada", seq: { lo: 0, hi: 100 },
+    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 25, range: [0, 100], thresh: 25,
+    pos: "más nublada", neg: "más despejada",
   },
 
   precip: {
     label: "Tasa de precipitación (equiv. líquido)", group: "precip", file: "precipitation_rate", leads: "std",
-    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, scales: [0.1, 0.25, 0.5, 1, 2], scale: 0.5, thresh: 0.25,
-    pos: "más lluvia", neg: "menos lluvia", seq: { lo: 0, hi: "p99", hiMin: 0.5 },
+    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 4], thresh: 0.25,
+    pos: "más lluvia", neg: "menos lluvia",
   },
 };
 
-// Flechas de viento: una cada `step` celdas (media del bloque), longitud proporcional a la velocidad hasta `vref` (m/s).
-export const ARROWS = { step: 48, vref: 20, minSpeed: 0.5, minLen: 5 };
+// Flechas de viento: separadas `spacing` píxeles de pantalla (media del bloque de celdas correspondiente, así que la densidad
+// se adapta al zoom), longitud proporcional a la velocidad hasta `vref` (m/s).
+export const ARROWS = { spacing: 34, vref: 20, minSpeed: 0.5, minLen: 5 };
 
 // Referencia de la dirección en los ficheros: "north" (norte verdadero) o "grid" (norte de la malla).
 // Los datos lo sugieren (balance geostrófico en 24 campos: pendiente −8 ± 1 °/1000 km; 0 si fuera "grid", ≈ −13 si "north"),
