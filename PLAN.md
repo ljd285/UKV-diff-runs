@@ -86,3 +86,10 @@ TWO bloquea a Actions (ver arriba), así que la fuente pasa a ser el bucket abie
 **Diseño propuesto (todo JS, sin backend)**
 - Navegador: lista ciclos por S3, elige pasada A y B y alcance, descarga 2 ficheros (~3 MB), lee con h5wasm, resta B-A y pinta en `<canvas>` (diferencia, A y B) con lectura de valor al pasar el ratón y punto de interés por lat/lon (proyección LAEA a mano).
 - Opcional: Actions solo para pre-calcular resúmenes (diferencia media/máx por región) si se quiere un panel histórico rápido.
+
+## Estado del visor (8 oct)
+
+- `docs/index.html` + `docs/app.js`: mapa de diferencias A − B de todo el UKV 2 km, leyendo el bucket directamente desde el navegador (h5wasm vendorizado en `docs/vendor/h5wasm`). Variables: T 1,5 m, Tmáx/Tmín última hora, rocío. Comparación con −12/−24/−36/−48 h. Vistas: diferencia (divergente azul/rojo, escala ±1..8 °C), pasada A y pasada B (secuencial azul). Puntos de ciudades sin nombre; costa Natural Earth 50 m (`scripts/build-coast.mjs` -> `docs/coast.json`). Estadísticos: media, MAE, RMSE, extremos, % celdas |Δ|>1 °C.
+- `docs/laea.js`: proyección LAEA elipsoidal; coincide con pyproj al metro.
+- El visor de imágenes de TWO queda en `docs/images.html`.
+- Probado en Chromium con datos reales (claro y oscuro). Durante las pruebas el proxy del sandbox devolvió 404 intermitentes a ficheros que existen; el visor reintenta una vez.
