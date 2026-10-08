@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Diferencias entre pasadas UKV</title>
+<title>Diferencias entre salidas UKV</title>
 <style>
   :root {
     --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5d6670; --line:#d8dde3; --accent:#256abf;
@@ -14,7 +14,7 @@
   }
   * { box-sizing:border-box; }
   body { margin:0; padding:16px; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,sans-serif; }
-  main { max-width:1100px; margin:0 auto; }
+  main { max-width:1400px; margin:0 auto; }
   h1 { font-size:1.25rem; margin:0 0 4px; }
   .sub { color:var(--muted); margin:0 0 14px; }
   .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
@@ -31,15 +31,27 @@
   .seg button[aria-pressed=true] { background:var(--accent); color:#fff; }
   .info { font-size:.85rem; color:var(--muted); margin-top:10px; }
   .info b { color:var(--ink); }
+  /* Espacio reservado: ni la línea de validez ni los errores desplazan el mapa. */
+  #info, #status { min-height:1.4em; }
   #status.err { color:#d1242f; }
-  .mapwrap { position:relative; background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; line-height:0; }
-  .mapwrap canvas { width:100%; height:auto; display:block; }
-  .mapwrap canvas + canvas { position:absolute; inset:0; }
+
+  #maps { display:grid; grid-template-columns:repeat(var(--cols,1), minmax(0,1fr)); gap:12px; transition:opacity .15s; }
+  #maps.loading { opacity:.55; cursor:progress; }
+  @media (max-width:820px) { #maps { grid-template-columns:minmax(0,1fr); } }
+  figure.map { margin:0; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px; }
+  figure.map figcaption { font-size:.85rem; margin-bottom:6px; }
+  figure.map figcaption span { color:var(--muted); }
+  figure.map canvas { width:100%; height:auto; display:block; background:var(--surface); border-radius:4px; }
+  /* Barra arriba a todo el ancho y las dos etiquetas debajo, una a cada lado: no se rompe en paneles estrechos. */
+  .legend { display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; margin-top:8px; font-size:.75rem; color:var(--muted); }
+  .legend canvas { grid-column:1 / -1; grid-row:1; width:100%; height:10px; border-radius:3px; border:1px solid var(--line); }
+  .legend span:last-child { text-align:right; }
+  #arrowkey { font-size:.8rem; color:var(--muted); margin-top:10px; }
+  #arrowkey b { display:inline-block; width:18px; height:3px; vertical-align:middle; border-radius:2px; }
+
   #tip { position:fixed; pointer-events:none; z-index:5; background:var(--card); color:var(--ink); border:1px solid var(--line);
          border-radius:6px; padding:6px 8px; font-size:.8rem; line-height:1.4; box-shadow:0 2px 8px #0003; display:none; white-space:nowrap; }
   #tip b { font-variant-numeric:tabular-nums; }
-  .legend { display:flex; align-items:center; gap:10px; margin-top:10px; font-size:.8rem; color:var(--muted); }
-  .legend canvas { flex:1; max-width:420px; height:12px; border-radius:3px; border:1px solid var(--line); }
   .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:12px; }
   .stat { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:var(--card); }
   .stat span { display:block; font-size:.75rem; color:var(--muted); }
@@ -50,15 +62,15 @@
 </head>
 <body>
 <main>
-  <h1>Diferencias entre pasadas UKV</h1>
-  <p class="sub">Met Office UKV 2 km (datos abiertos en AWS). Diferencia entre dos pasadas para la misma hora de validez.</p>
+  <h1>Diferencias entre salidas UKV</h1>
+  <p class="sub">Met Office UKV 2 km (datos abiertos en AWS). Diferencia entre la última salida y una salida anterior para la misma hora de validez.</p>
 
   <div class="panel">
     <div class="row">
       <label>Variable
         <select id="variable"></select>
       </label>
-      <label>Pasada A (más reciente)
+      <label>Última salida
         <span style="display:flex;gap:6px">
           <input type="date" id="date">
           <select id="run"><option value="03">03Z</option><option value="15">15Z</option></select>
@@ -66,42 +78,39 @@
       </label>
       <label>Comparar con
         <select id="offset">
-          <option value="12">Pasada anterior (−12 h)</option>
-          <option value="24">Misma pasada, 1 día antes (−24 h)</option>
+          <option value="12">Salida anterior (−12 h)</option>
+          <option value="24">Misma salida, 1 día antes (−24 h)</option>
           <option value="36">−36 h</option>
           <option value="48">−48 h</option>
         </select>
       </label>
-      <label>Vista
-        <span class="seg" id="view">
-          <button data-v="diff" aria-pressed="true">Diferencia</button>
-          <button data-v="a" aria-pressed="false">Pasada A</button>
-          <button data-v="b" aria-pressed="false">Pasada B</button>
-        </span>
+      <label>Zona
+        <select id="region"></select>
       </label>
-      <label id="scaleWrap">Escala ±
-        <select id="scale"></select>
+      <label>Mapas
+        <span class="seg" id="panels" role="group" aria-label="Mapas a mostrar">
+          <button data-k="a" aria-pressed="false">Última salida</button>
+          <button data-k="b" aria-pressed="false">Salida anterior</button>
+          <button data-k="diff" aria-pressed="true">Diferencia</button>
+        </span>
       </label>
     </div>
     <div class="row">
-      <label>Alcance de la pasada A: <b id="leadLabel"></b>
+      <label>Alcance de la última salida: <b id="leadLabel"></b>
         <input type="range" id="lead" min="0" max="0" value="0">
       </label>
       <button id="prev" aria-label="Alcance anterior">◀</button>
       <button id="next" aria-label="Alcance siguiente">▶</button>
     </div>
     <div class="info" id="info"></div>
-    <div class="info" id="status">Cargando…</div>
+    <div class="info" id="status" role="status"></div>
   </div>
 
-  <div class="mapwrap" id="mapwrap">
-    <canvas id="map"></canvas>
-    <canvas id="over"></canvas>
-  </div>
-  <div class="legend" id="legend"></div>
+  <div id="maps" aria-live="polite"></div>
+  <div id="arrowkey"></div>
   <div class="stats" id="stats"></div>
 
-  <p class="foot">Diferencia = pasada A − pasada B (rojo: A más cálida, azul: A más fría). Malla del modelo en proyección Lambert azimutal; los puntos son referencias de ciudades.
+  <p class="foot">Diferencia = última salida − salida anterior (rojo: la última más cálida, azul: más fría). Malla del modelo en proyección Lambert azimutal; los puntos son referencias de ciudades.
   Datos: Met Office, CC BY-SA 4.0, sin garantía. Costa: Natural Earth. <a href="images.html">Visor de imágenes de TWO</a>.</p>
 </main>
 <div id="tip"></div>

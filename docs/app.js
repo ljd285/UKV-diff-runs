@@ -1,11 +1,13 @@
 import h5wasm from "./vendor/h5wasm/hdf5_hl.js";
 import { makeLaea, makeConvergence } from "./laea.js";
 import { GROUPS, VARIABLES, DEFAULT_VARIABLE, validLeads, ARROWS, WIND_DIR_REFERENCE } from "./variables.js";
+import { REGION_GROUPS, REGIONS, DEFAULT_REGION } from "./regions.js";
 
 const BASE = "https://met-office-atmospheric-model-data.s3-eu-west-2.amazonaws.com/uk-deterministic-2km";
 const AVAILABLE_AFTER_H = 4.5; // el ciclo completo se termina de subir ~4 h 15 min después de su hora
 const HOUR = 3600e3;
 const RAD = Math.PI / 180;
+const NAME = { a: "Última salida", b: "Salida anterior", diff: "Diferencia" };
 
 // Ciudades de referencia (solo punto, sin nombre).
 const CITIES = [
@@ -41,7 +43,7 @@ const palettes = () => dark()
       diff: lut(["#184f95", "#6da7ec", "#f0efec", "#f08c7a", "#a8201a"]),
       seq: lut(["#dbe9fb", "#2a78d6", "#0d366b"]),
     };
-// Flechas de A y B: color + halo para que se lean sobre cualquier fondo.
+// Flechas: color + halo para que se lean sobre cualquier fondo.
 const arrowStyle = () => dark()
   ? { A: "#f4f6f8", B: "#ffb454", halo: "rgba(0,0,0,0.75)" }
   : { A: "#111418", B: "#c2410c", halo: "rgba(255,255,255,0.85)" };
@@ -68,7 +70,7 @@ async function loadField(cycleT, lead, file) {
     res = await fetch(url);
   }
   if (res.status === 404 || res.status === 403) {
-    throw new Error(`No disponible: ${url.split("/").slice(-2).join("/")} (la pasada aún no está subida o ese alcance no existe).`);
+    throw new Error(`No disponible: ${url.split("/").slice(-2).join("/")} (la salida aún no está subida o ese alcance no existe).`);
   }
   if (!res.ok) throw new Error(`Error ${res.status} descargando ${url}`);
   const buf = new Uint8Array(await res.arrayBuffer());
@@ -95,7 +97,7 @@ async function loadField(cycleT, lead, file) {
   }
 }
 
-// Una pasada de una variable: {main} o, para el viento, {dir, speed}.
+// Una salida de una variable: {main} o, para el viento, {dir, speed}.
 async function loadSet(cycleT, lead, cfg) {
   const files = cfg.files ?? { main: cfg.file };
   const entries = await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loadField(cycleT, lead, f)]));
@@ -103,8 +105,8 @@ async function loadSet(cycleT, lead, cfg) {
 }
 
 // ---------- Cálculo de capas ----------
-// Devuelve, en la unidad mostrada: a, b (campos de las vistas A y B), diff (campo de la vista de diferencia)
-// y, para el viento, las flechas de A y B ya en ejes de la malla.
+// Devuelve, en la unidad mostrada: a, b (campos de cada salida) y diff (campo de la diferencia).
+// Para el viento añade dirección/velocidad crudas, de las que salen las flechas.
 function compute(cfg, SA, SB) {
   const kind = cfg.kind ?? "scalar";
   const grid = (SA.main ?? SA.speed);
@@ -121,29 +123,27 @@ function compute(cfg, SA, SB) {
     return { kind, grid, a, b, diff };
   }
 
-  // Viento: dirección = de dónde sopla (grados, sentido horario desde el norte).
+  // Viento: dirección = de dónde sopla (grados, sentido horario desde el norte). Velocidades crudas en m/s.
   const sA = SA.speed.data, sB = SB.speed.data, dA = SA.dir.data, dB = SB.dir.data;
+  const vf = cfg.viewFactor ?? 1, a = new Float32Array(n), b = new Float32Array(n);
   for (let i = 0; i < n; i++) {
+    a[i] = sA[i] * vf; b[i] = sB[i] * vf;
     if (kind === "wdiff") {
       diff[i] = Math.min(sA[i], sB[i]) < cfg.minSpeed ? NaN : ((dA[i] - dB[i] + 540) % 360) - 180; // circular, (−180, 180]
     } else {
       const uA = -sA[i] * Math.sin(dA[i] * RAD), vA = -sA[i] * Math.cos(dA[i] * RAD);
       const uB = -sB[i] * Math.sin(dB[i] * RAD), vB = -sB[i] * Math.cos(dB[i] * RAD);
-      diff[i] = Math.hypot(uA - uB, vA - vB); // invariante frente al giro de ejes
+      diff[i] = Math.hypot(uA - uB, vA - vB) * cfg.factor; // invariante frente al giro de ejes
     }
   }
-  return {
-    kind, grid, a: sA, b: sB, diff,
-    dirA: dA, dirB: dB,
-    arrows: { A: arrowField(grid, sA, dA), B: arrowField(grid, sB, dB) },
-  };
+  return { kind, grid, a, b, diff, dirA: dA, dirB: dB, rawA: sA, rawB: sB, wind: true };
 }
 
 // Media por bloques de `step` celdas del viento (componentes este/norte verdaderas), girada a ejes de la malla
-// si la dirección va respecto al norte verdadero. Devuelve flechas {px, py, u, v, s} en píxeles del lienzo.
+// si la dirección va respecto al norte verdadero. Devuelve flechas {px, py, u, v, s, m} en píxeles de la imagen.
 const convergence = makeConvergence();
-function arrowField(grid, speed, dir) {
-  const { nx, ny, x0, dx, y0, dy } = grid, step = ARROWS.step;
+function arrowField(grid, speed, dir, step) {
+  const { nx, ny, x0, dx, y0, dy } = grid;
   const out = [];
   for (let bj = 0; bj + step <= ny; bj += step) {
     for (let bi = 0; bi + step <= nx; bi += step) {
@@ -167,7 +167,12 @@ function arrowField(grid, speed, dir) {
 }
 
 // ---------- Estado / UI ----------
-const state = { view: "diff", cfg: null, layers: null, SA: null, SB: null, token: 0 };
+const state = {
+  cfg: null, layers: null, meta: null, token: 0,
+  region: DEFAULT_REGION, shown: { a: false, b: false, diff: true },
+  images: {}, arrowCache: new Map(),
+};
+let panels = [];
 
 function defaultCycle() {
   const now = Date.now();
@@ -178,7 +183,7 @@ function defaultCycle() {
   }
 }
 
-let leads = []; // alcances válidos de la pasada A para la variable y el desfase elegidos
+let leads = []; // alcances válidos de la última salida para la variable y el desfase elegidos
 
 function refreshLeads(wanted) {
   leads = validLeads(VARIABLES[$("variable").value], Number($("offset").value));
@@ -189,11 +194,6 @@ function refreshLeads(wanted) {
 }
 const currentLead = () => leads[Number($("lead").value)];
 
-function fillScales(cfg) {
-  $("scale").innerHTML = cfg.scales.map(v => `<option${v === cfg.scale ? " selected" : ""}>${v}</option>`).join("");
-  $("scaleWrap").firstChild.textContent = `Escala ± (${cfg.unit})`;
-}
-
 function readControls() {
   const [y, m, d] = $("date").value.split("-").map(Number);
   const tA = Date.UTC(y, m - 1, d) + Number($("run").value) * HOUR;
@@ -202,74 +202,72 @@ function readControls() {
 }
 const fmt = t => { const d = new Date(t); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}Z`; };
 
-function setStatus(msg, err = false) { const s = $("status"); s.textContent = msg; s.className = "info" + (err ? " err" : ""); }
+// Solo errores: mientras carga no se muestra texto (cambiaba la altura de la página y desplazaba el mapa).
+function setStatus(msg = "") { const s = $("status"); s.textContent = msg; s.className = "info" + (msg ? " err" : ""); }
 
 async function update() {
   const c = readControls();
   const token = ++state.token;
-  if (c.lead === undefined) { setStatus("Esta variable no tiene alcances comunes para ese desfase.", true); return; }
+  if (c.lead === undefined) { setStatus("Esta variable no tiene alcances comunes para ese desfase."); return; }
   $("leadLabel").textContent = `+${c.lead} h`;
-  $("info").innerHTML = `Validez <b>${fmt(c.tA + c.lead * HOUR)}</b> · A: <b>${fmt(c.tA)} +${c.lead} h</b> · B: <b>${fmt(c.tB)} +${c.leadB} h</b>`;
-  setStatus("Descargando…");
+  $("info").innerHTML = `Validez <b>${fmt(c.tA + c.lead * HOUR)}</b>`;
+  setStatus();
+  $("maps").classList.add("loading");
   try {
     const [SA, SB] = await Promise.all([loadSet(c.tA, c.lead, c.cfg), loadSet(c.tB, c.leadB, c.cfg)]);
     if (token !== state.token) return;
     state.cfg = c.cfg;
     state.layers = compute(c.cfg, SA, SB);
-    setStatus("");
-    render();
+    state.meta = { a: `${fmt(c.tA)} +${c.lead} h`, b: `${fmt(c.tB)} +${c.leadB} h` };
+    state.images = {}; state.arrowCache.clear();
+    drawAll();
+    drawStats(c.cfg, state.layers);
+    drawArrowKey();
   } catch (e) {
     if (token !== state.token) return;
     state.layers = null;
-    clearCanvas();
-    setStatus(e.message, true);
+    for (const p of panels) p.canvas.getContext("2d").clearRect(0, 0, p.canvas.width, p.canvas.height);
+    $("stats").innerHTML = ""; $("arrowkey").innerHTML = "";
+    setStatus(e.message);
+  } finally {
+    if (token === state.token) $("maps").classList.remove("loading");
   }
 }
 
-// ---------- Dibujo ----------
-const map = $("map"), over = $("over");
-function clearCanvas() {
-  for (const cv of [map, over]) cv.getContext("2d").clearRect(0, 0, cv.width, cv.height);
-  $("stats").innerHTML = ""; $("legend").innerHTML = "";
+// ---------- Paneles ----------
+function buildPanels() {
+  const kinds = ["a", "b", "diff"].filter(k => state.shown[k]);
+  const maps = $("maps");
+  maps.style.setProperty("--cols", kinds.length);
+  maps.style.maxWidth = kinds.length === 1 ? "860px" : "";
+  maps.style.margin = kinds.length === 1 ? "0 auto" : "";
+  maps.innerHTML = "";
+  panels = kinds.map(kind => {
+    const fig = document.createElement("figure");
+    fig.className = "map";
+    fig.innerHTML = '<figcaption></figcaption><canvas></canvas><div class="legend"></div>';
+    maps.append(fig);
+    const canvas = fig.querySelector("canvas");
+    canvas.addEventListener("pointermove", e => onMove(e, canvas));
+    canvas.addEventListener("pointerleave", () => { $("tip").style.display = "none"; });
+    return { kind, canvas, caption: fig.querySelector("figcaption"), legend: fig.querySelector(".legend") };
+  });
 }
 
-const percentile = (arr, p) => { const s = Float32Array.from(arr).sort(); return s[Math.floor(p * (s.length - 1))]; };
-
-let coast = null;
-async function getCoast() { return coast ??= await (await fetch("coast.json")).json(); }
-const laea = makeLaea();
-
-// Rango de la vista secuencial (A y B), en la unidad mostrada.
-function seqRange(cfg, a, b) {
-  const q = cfg.seq ?? "auto";
-  const both = new Float32Array(a.length + b.length); both.set(a); both.set(b, a.length);
-  let lo, hi;
-  if (q === "auto") { lo = percentile(both, 0.02); hi = percentile(both, 0.98); }
-  else { lo = q.lo; hi = q.hi === "p99" ? Math.max(percentile(both, 0.995), q.hiMin ?? 0) : q.hi; }
-  if (!(hi > lo)) hi = lo + 1;
-  return [lo, hi];
-}
-
-function render() {
+// Imagen (a resolución de malla) de cada mapa; se recorta y escala al dibujar, así el zoom no recalcula nada.
+function getImage(kind) {
+  if (state.images[kind]) return state.images[kind];
   const { cfg, layers } = state;
-  if (!layers) return;
-  const { nx, ny } = layers.grid;
-  for (const cv of [map, over]) { cv.width = nx; cv.height = ny; }
-  const pal = palettes();
-  const view = state.view;
-
+  const { nx, ny } = layers.grid, pal = palettes();
   let vals, lo, hi, table;
-  if (view === "diff") {
-    const s = Number($("scale").value);
+  if (kind === "diff") {
     vals = layers.diff; table = layers.kind === "vector" ? pal.seq : pal.diff; // el módulo no tiene signo
-    [lo, hi] = layers.kind === "vector" ? [0, s] : [-s, s];
+    [lo, hi] = layers.kind === "vector" ? [0, cfg.diffScale] : [-cfg.diffScale, cfg.diffScale];
   } else {
-    // misma escala para A y B, para que sean comparables entre sí
-    vals = view === "a" ? layers.a : layers.b;
-    [lo, hi] = seqRange(cfg, layers.a, layers.b); table = pal.seq;
+    vals = kind === "a" ? layers.a : layers.b;
+    [lo, hi] = cfg.range; table = pal.seq;
   }
-  const img = new ImageData(nx, ny);
-  const px = img.data;
+  const img = new ImageData(nx, ny), px = img.data;
   for (let r = 0; r < ny; r++) {
     const j = ny - 1 - r; // la malla va de sur a norte
     for (let i = 0; i < nx; i++) {
@@ -280,21 +278,103 @@ function render() {
       px[o] = table[t]; px[o + 1] = table[t + 1]; px[o + 2] = table[t + 2]; px[o + 3] = 255;
     }
   }
-  map.getContext("2d").putImageData(img, 0, 0);
-  drawOverlay();
-  drawLegend(cfg, layers, view, lo, hi, table);
-  drawStats(cfg, layers);
+  const off = document.createElement("canvas");
+  off.width = nx; off.height = ny;
+  off.getContext("2d").putImageData(img, 0, 0);
+  return (state.images[kind] = { canvas: off, lo, hi, table });
 }
 
-function drawArrows(ctx, list, color, width) {
-  const st = arrowStyle(), maxLen = ARROWS.step * 0.95;
+const laea = makeLaea();
+const toImagePx = (g, lon, lat) => {
+  const [x, y] = laea(lon, lat);
+  return [(x - g.x0) / g.dx + 0.5, g.ny - 1 - (y - g.y0) / g.dy + 0.5];
+};
+
+// Recorte (en píxeles de la imagen) de la zona elegida.
+function getCrop(g) {
+  const reg = REGIONS[state.region];
+  if (!reg.box) return { sx: 0, sy: 0, sw: g.nx, sh: g.ny };
+  const [w, s, e, n] = reg.box;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let k = 0; k <= 12; k++) { // se muestrean los bordes: la caja en lon/lat no es un rectángulo en la malla
+    const t = k / 12, lon = w + (e - w) * t, lat = s + (n - s) * t;
+    for (const [lo, la] of [[lon, s], [lon, n], [w, lat], [e, lat]]) {
+      const [px, py] = toImagePx(g, lo, la);
+      x0 = Math.min(x0, px); x1 = Math.max(x1, px); y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+    }
+  }
+  const padX = (x1 - x0) * 0.02, padY = (y1 - y0) * 0.02;
+  x0 = Math.max(0, x0 - padX); x1 = Math.min(g.nx, x1 + padX);
+  y0 = Math.max(0, y0 - padY); y1 = Math.min(g.ny, y1 + padY);
+  return { sx: x0, sy: y0, sw: x1 - x0, sh: y1 - y0 };
+}
+
+// La costa se carga antes de dibujar nada, para que drawPanel sea síncrono (sin carreras al redimensionar).
+const coast = await (await fetch("coast.json")).json();
+
+function drawAll() {
+  for (const p of panels) drawPanel(p);
+}
+
+function drawPanel(p) {
+  const L = state.layers;
+  if (!L) return;
+  const img = getImage(p.kind), crop = getCrop(L.grid), cfg = state.cfg;
+  const cssW = p.canvas.clientWidth || 320, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const W = Math.round(cssW * dpr), H = Math.round(W * crop.sh / crop.sw);
+  p.canvas.style.aspectRatio = `${crop.sw} / ${crop.sh}`;
+  if (p.canvas.width !== W || p.canvas.height !== H) { p.canvas.width = W; p.canvas.height = H; }
+  const ctx = p.canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(img.canvas, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, W, H);
+  const f = W / crop.sw; // píxeles del lienzo por píxel de imagen
+  const to = (lon, lat) => { const [px, py] = toImagePx(L.grid, lon, lat); return [(px - crop.sx) * f, (py - crop.sy) * f]; };
+
+  const ink = dark() ? "230,233,237" : "27,31,36", ring = dark() ? "#1a1a19" : "#ffffff";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = `rgba(${ink},0.6)`; ctx.lineWidth = 1.3 * dpr;
+  for (const line of coast) {
+    ctx.beginPath();
+    line.forEach(([lon, lat], k) => { const [x, y] = to(lon, lat); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  }
+  if (L.wind) {
+    const st = arrowStyle();
+    if (p.kind !== "a") drawArrows(ctx, "B", st.B, 1.8, crop, f, dpr, cssW);
+    if (p.kind !== "b") drawArrows(ctx, "A", st.A, 1.6, crop, f, dpr, cssW);
+  }
+  for (const [lon, lat] of CITIES) {
+    const [x, y] = to(lon, lat);
+    if (x < 0 || y < 0 || x > W || y > H) continue;
+    ctx.beginPath(); ctx.arc(x, y, 5.5 * dpr, 0, 7); ctx.fillStyle = ring; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, 3.5 * dpr, 0, 7); ctx.fillStyle = `rgb(${ink})`; ctx.fill();
+  }
+
+  // Título y leyenda
+  const meta = p.kind === "diff" ? "última − anterior" : state.meta[p.kind];
+  p.caption.innerHTML = `<b>${NAME[p.kind]}</b> <span>· ${meta}</span>`;
+  drawLegend(p, cfg, L, img);
+}
+
+function drawArrows(ctx, which, color, width, crop, f, dpr, cssW) {
+  const L = state.layers, g = L.grid, st = arrowStyle();
+  // la densidad se mide en píxeles de pantalla: al hacer zoom aparecen más flechas
+  const step = Math.min(120, Math.max(2, Math.round(ARROWS.spacing / (cssW / crop.sw))));
+  const key = `${which}:${step}`;
+  if (!state.arrowCache.has(key)) {
+    state.arrowCache.set(key, arrowField(g, which === "A" ? L.rawA : L.rawB, which === "A" ? L.dirA : L.dirB, step));
+  }
+  const maxLen = ARROWS.spacing * 0.95 * dpr, minLen = ARROWS.minLen * dpr;
   const path = new Path2D();
-  for (const a of list) {
+  for (const a of state.arrowCache.get(key)) {
+    const x = (a.px - crop.sx) * f, y = (a.py - crop.sy) * f;
+    if (x < -maxLen || y < -maxLen || x > crop.sw * f + maxLen || y > crop.sh * f + maxLen) continue;
     if (a.s < ARROWS.minSpeed || a.m < 1e-6) continue;
-    const len = ARROWS.minLen + (maxLen - ARROWS.minLen) * Math.min(a.s / ARROWS.vref, 1);
+    const len = minLen + (maxLen - minLen) * Math.min(a.s / ARROWS.vref, 1);
     const ux = a.u / a.m, uy = -a.v / a.m; // el eje y del lienzo crece hacia abajo
-    const hx = a.px + ux * len / 2, hy = a.py + uy * len / 2, tx = a.px - ux * len / 2, ty = a.py - uy * len / 2;
-    const h = Math.min(5, len * 0.4), ang = Math.atan2(uy, ux);
+    const hx = x + ux * len / 2, hy = y + uy * len / 2, tx = x - ux * len / 2, ty = y - uy * len / 2;
+    const h = Math.min(5 * dpr, len * 0.4), ang = Math.atan2(uy, ux);
     path.moveTo(tx, ty); path.lineTo(hx, hy);
     for (const s of [-1, 1]) {
       path.moveTo(hx, hy);
@@ -302,66 +382,35 @@ function drawArrows(ctx, list, color, width) {
     }
   }
   ctx.lineCap = "round"; ctx.lineJoin = "round";
-  ctx.strokeStyle = st.halo; ctx.lineWidth = width + 2.4; ctx.stroke(path);
-  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(path);
+  ctx.strokeStyle = st.halo; ctx.lineWidth = (width + 2.4) * dpr; ctx.stroke(path);
+  ctx.strokeStyle = color; ctx.lineWidth = width * dpr; ctx.stroke(path);
 }
 
-async function drawOverlay() {
-  const { layers } = state;
-  if (!layers) return;
-  const g = layers.grid;
-  const ctx = over.getContext("2d");
-  ctx.clearRect(0, 0, over.width, over.height);
-  const toPx = (lon, lat) => {
-    const [x, y] = laea(lon, lat);
-    return [(x - g.x0) / g.dx + 0.5, g.ny - 1 - (y - g.y0) / g.dy + 0.5];
-  };
-  const ink = dark() ? "230,233,237" : "27,31,36", ring = dark() ? "#1a1a19" : "#ffffff";
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = `rgba(${ink},0.55)`; ctx.lineWidth = 1.4;
-  for (const line of await getCoast()) {
-    ctx.beginPath();
-    line.forEach(([lon, lat], k) => { const [x, y] = toPx(lon, lat); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-    ctx.stroke();
-  }
-  if (layers.arrows) {
-    const st = arrowStyle();
-    if (state.view !== "a") drawArrows(ctx, layers.arrows.B, st.B, 1.8);
-    if (state.view !== "b") drawArrows(ctx, layers.arrows.A, st.A, 1.6);
-  }
-  for (const [lon, lat] of CITIES) {
-    const [x, y] = toPx(lon, lat);
-    ctx.beginPath(); ctx.arc(x, y, 5.5, 0, 7); ctx.fillStyle = ring; ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 7); ctx.fillStyle = `rgb(${ink})`; ctx.fill();
-  }
-}
-
-function drawLegend(cfg, layers, view, lo, hi, table) {
-  const lg = $("legend");
+function drawLegend(p, cfg, layers, img) {
+  const lg = p.legend;
   lg.innerHTML = "";
   const left = document.createElement("span"), right = document.createElement("span");
   const bar = document.createElement("canvas"); bar.width = 256; bar.height = 1;
   const id = new ImageData(256, 1);
-  id.data.set(table.subarray(0, 1024));
+  id.data.set(img.table.subarray(0, 1024));
   bar.getContext("2d").putImageData(id, 0, 0);
-  const vu = cfg.viewUnit ?? cfg.unit, vd = cfg.viewDecimals ?? cfg.decimals;
-  if (view !== "diff") {
-    left.textContent = `${lo.toFixed(vd)} ${vu}`; right.textContent = `${hi.toFixed(vd)} ${vu}`;
+  const vu = cfg.viewUnit ?? cfg.unit;
+  if (p.kind !== "diff") {
+    left.textContent = `${img.lo} ${vu}`; right.textContent = `${img.hi} ${vu}`;
   } else if (layers.kind === "vector") {
-    left.textContent = `0 ${cfg.unit}`; right.textContent = `${hi} ${cfg.unit} · módulo de A − B`;
+    left.textContent = `0 ${cfg.unit}`; right.textContent = `${img.hi} ${cfg.unit} · módulo de la diferencia`;
   } else {
-    left.textContent = `${lo} ${cfg.unit} · A ${cfg.neg}`; right.textContent = `A ${cfg.pos} · +${hi} ${cfg.unit}`;
+    left.textContent = `${img.lo} ${cfg.unit} · última ${cfg.neg}`; right.textContent = `última ${cfg.pos} · +${img.hi} ${cfg.unit}`;
   }
-  lg.append(left, bar, right);
-  if (layers.arrows) {
-    const st = arrowStyle(), k = document.createElement("span");
-    k.style.cssText = "flex-basis:100%;max-width:none";
-    const sw = c => `<b style="display:inline-block;width:18px;height:3px;background:${c};vertical-align:middle;border-radius:2px"></b>`;
-    const what = view === "a" ? `${sw(st.A)} A` : view === "b" ? `${sw(st.B)} B` : `${sw(st.A)} A · ${sw(st.B)} B`;
-    k.innerHTML = `Flechas: ${what} — hacia donde sopla; longitud ∝ velocidad (máx. ${ARROWS.vref} m/s), cada ${ARROWS.step * 2} km`;
-    lg.style.flexWrap = "wrap";
-    lg.append(k);
-  } else lg.style.flexWrap = "";
+  lg.append(bar, left, right);
+}
+
+function drawArrowKey() {
+  const el = $("arrowkey");
+  if (!state.layers?.wind) { el.innerHTML = ""; return; }
+  const st = arrowStyle();
+  const sw = c => `<b style="background:${c}"></b>`;
+  el.innerHTML = `Flechas: ${sw(st.A)} ${NAME.a} · ${sw(st.B)} ${NAME.b} (en la diferencia se muestran ambas) — hacia donde sopla; longitud ∝ velocidad (máx. ${Math.round(ARROWS.vref * (state.cfg.viewFactor ?? 1))} ${state.cfg.viewUnit ?? "m/s"})`;
 }
 
 function drawStats(cfg, layers) {
@@ -379,26 +428,26 @@ function drawStats(cfg, layers) {
     const mean = arr => { let s = 0; for (const v of arr) s += v; return s / arr.length; };
     const vu = ` ${cfg.viewUnit ?? cfg.unit}`;
     tiles = [
-      ["Módulo medio de A − B", (sum / n).toFixed(dec) + u],
+      ["Módulo medio de la diferencia", (sum / n).toFixed(dec) + u],
       ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
       ["Máximo", mx.toFixed(dec) + u],
-      [`Celdas con |A − B| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
-      ["Velocidad media A", mean(layers.a).toFixed(dec) + vu],
-      ["Velocidad media B", mean(layers.b).toFixed(dec) + vu],
+      [`Celdas con diferencia > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
+      [`Velocidad media · ${NAME.a.toLowerCase()}`, mean(layers.a).toFixed(dec) + vu],
+      [`Velocidad media · ${NAME.b.toLowerCase()}`, mean(layers.b).toFixed(dec) + vu],
     ];
   } else {
     tiles = [
       ["Diferencia media", sg(sum / n) + u],
       ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
       ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
-      [`Máx. A ${cfg.pos}`, sg(mx) + u],
-      [`Máx. A ${cfg.neg}`, sg(mn) + u],
+      [`Última ${cfg.pos} (máx.)`, sg(mx) + u],
+      [`Última ${cfg.neg} (máx.)`, sg(mn) + u],
       [`Celdas con |Δ| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
     ];
     if (layers.kind === "wdiff") {
       // los extremos de una diferencia circular (±180°) no informan: se sustituyen por la cobertura de la máscara
       tiles.splice(3, 2);
-      tiles.push(["Celdas con viento ≥ " + cfg.minSpeed + " m/s en A y B", `${(100 * n / diff.length).toFixed(1)} %`]);
+      tiles.push([`Celdas con viento ≥ ${Math.round(cfg.minSpeed * cfg.viewFactor)} ${cfg.viewUnit} en ambas salidas`, `${(100 * n / diff.length).toFixed(1)} %`]);
     }
   }
   $("stats").innerHTML = tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
@@ -406,29 +455,27 @@ function drawStats(cfg, layers) {
 
 // ---------- Tooltip ----------
 const tip = $("tip");
-over.addEventListener("pointermove", e => {
+function onMove(e, canvas) {
   const { cfg, layers } = state;
   if (!layers) return;
-  const g = layers.grid;
-  const r = over.getBoundingClientRect();
-  const i = Math.floor((e.clientX - r.left) / r.width * g.nx), row = Math.floor((e.clientY - r.top) / r.height * g.ny);
-  const j = g.ny - 1 - row;
+  const g = layers.grid, crop = getCrop(g), r = canvas.getBoundingClientRect();
+  const px = crop.sx + (e.clientX - r.left) / r.width * crop.sw, py = crop.sy + (e.clientY - r.top) / r.height * crop.sh;
+  const i = Math.floor(px), j = g.ny - 1 - Math.floor(py);
   if (i < 0 || j < 0 || i >= g.nx || j >= g.ny) { tip.style.display = "none"; return; }
   const k = j * g.nx + i;
   const d = layers.diff[k], dec = cfg.decimals, sgn = d > 0 ? "+" : "";
   const dtxt = Number.isFinite(d) ? `${sgn}${d.toFixed(dec)} ${cfg.unit}` : "sin dato (viento flojo)";
   if (layers.kind === "scalar") {
-    tip.innerHTML = `Δ <b>${dtxt}</b><br>A <b>${layers.a[k].toFixed(dec)}</b> · B <b>${layers.b[k].toFixed(dec)}</b> ${cfg.unit}`;
+    tip.innerHTML = `Δ <b>${dtxt}</b><br>Última <b>${layers.a[k].toFixed(dec)}</b> · Anterior <b>${layers.b[k].toFixed(dec)}</b> ${cfg.unit}`;
   } else {
     const vd = cfg.viewDecimals ?? cfg.decimals, vu = cfg.viewUnit ?? cfg.unit;
     const line = (n, s, dir) => `${n} <b>${s.toFixed(vd)}</b> ${vu} · <b>${Math.round(dir)}°</b>`;
-    tip.innerHTML = `${layers.kind === "vector" ? "|A − B|" : "Δ dirección"} <b>${dtxt}</b><br>${line("A", layers.a[k], layers.dirA[k])}<br>${line("B", layers.b[k], layers.dirB[k])}`;
+    tip.innerHTML = `${layers.kind === "vector" ? "|Δ vector|" : "Δ dirección"} <b>${dtxt}</b><br>${line("Última", layers.a[k], layers.dirA[k])}<br>${line("Anterior", layers.b[k], layers.dirB[k])}`;
   }
   tip.style.display = "block";
-  tip.style.left = Math.min(e.clientX + 14, innerWidth - 190) + "px";
+  tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
   tip.style.top = e.clientY + 14 + "px";
-});
-over.addEventListener("pointerleave", () => { tip.style.display = "none"; });
+}
 
 // ---------- Eventos ----------
 function init() {
@@ -440,28 +487,39 @@ function init() {
     `<optgroup label="${g.label}">${Object.entries(VARIABLES).filter(([, v]) => v.group === g.id)
       .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("")}</optgroup>`).join("");
   $("variable").value = DEFAULT_VARIABLE;
-  fillScales(VARIABLES[DEFAULT_VARIABLE]);
+  $("region").innerHTML = REGION_GROUPS.map(g =>
+    `<optgroup label="${g.label}">${g.regions.map(r => `<option value="${r.id}">${r.label}</option>`).join("")}</optgroup>`).join("");
+  $("region").value = DEFAULT_REGION;
   refreshLeads(24);
+  buildPanels();
 
-  $("variable").addEventListener("input", () => {
-    const keep = currentLead();
-    fillScales(VARIABLES[$("variable").value]); refreshLeads(keep); update();
-  });
+  $("variable").addEventListener("input", () => { const keep = currentLead(); refreshLeads(keep); update(); });
   $("offset").addEventListener("input", () => { refreshLeads(currentLead()); update(); });
-  for (const id of ["date", "run", "lead"]) $(id).addEventListener("input", update);
-  $("scale").addEventListener("input", render);
+  for (const id of ["date", "run"]) $(id).addEventListener("input", update);
+  // El deslizador actualiza la etiqueta al instante y descarga al soltar/pausar, no en cada paso.
+  let timer;
+  $("lead").addEventListener("input", () => {
+    $("leadLabel").textContent = `+${currentLead()} h`;
+    clearTimeout(timer); timer = setTimeout(update, 150);
+  });
   const nudge = k => { $("lead").value = Math.min(leads.length - 1, Math.max(0, Number($("lead").value) + k)); update(); };
   $("prev").onclick = () => nudge(-1);
   $("next").onclick = () => nudge(1);
-  $("view").addEventListener("click", e => {
+
+  $("region").addEventListener("input", () => { state.region = $("region").value; drawAll(); });
+  $("panels").addEventListener("click", e => {
     const b = e.target.closest("button");
     if (!b) return;
-    state.view = b.dataset.v;
-    document.querySelectorAll("#view button").forEach(x => x.setAttribute("aria-pressed", x === b));
-    $("scaleWrap").style.visibility = state.view === "diff" ? "visible" : "hidden";
-    render();
+    const k = b.dataset.k;
+    if (state.shown[k] && Object.values(state.shown).filter(Boolean).length === 1) return; // al menos un mapa
+    state.shown[k] = !state.shown[k];
+    b.setAttribute("aria-pressed", state.shown[k]);
+    buildPanels(); drawAll();
   });
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+
+  let raf;
+  new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(drawAll); }).observe($("maps"));
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { state.images = {}; drawAll(); });
   update();
 }
 init();
