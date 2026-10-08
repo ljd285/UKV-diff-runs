@@ -1,10 +1,11 @@
 import h5wasm from "./vendor/h5wasm/hdf5_hl.js";
-import { makeLaea } from "./laea.js";
-import { GROUPS, VARIABLES, DEFAULT_VARIABLE, validLeads } from "./variables.js";
+import { makeLaea, makeConvergence } from "./laea.js";
+import { GROUPS, VARIABLES, DEFAULT_VARIABLE, validLeads, ARROWS, WIND_DIR_REFERENCE } from "./variables.js";
 
 const BASE = "https://met-office-atmospheric-model-data.s3-eu-west-2.amazonaws.com/uk-deterministic-2km";
 const AVAILABLE_AFTER_H = 4.5; // el ciclo completo se termina de subir ~4 h 15 min después de su hora
 const HOUR = 3600e3;
+const RAD = Math.PI / 180;
 
 // Ciudades de referencia (solo punto, sin nombre).
 const CITIES = [
@@ -40,6 +41,10 @@ const palettes = () => dark()
       diff: lut(["#184f95", "#6da7ec", "#f0efec", "#f08c7a", "#a8201a"]),
       seq: lut(["#dbe9fb", "#2a78d6", "#0d366b"]),
     };
+// Flechas de A y B: color + halo para que se lean sobre cualquier fondo.
+const arrowStyle = () => dark()
+  ? { A: "#f4f6f8", B: "#ffb454", halo: "rgba(0,0,0,0.75)" }
+  : { A: "#111418", B: "#c2410c", halo: "rgba(255,255,255,0.85)" };
 
 // ---------- Datos ----------
 await h5wasm.ready;
@@ -51,12 +56,11 @@ function cycleName(t) {
   const d = new Date(t);
   return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}00Z`;
 }
-function urlFor(cycleT, lead, key) {
-  return `${BASE}/${cycleName(cycleT)}/${cycleName(cycleT + lead * HOUR)}-PT${pad(lead, 4)}H00M-${VARIABLES[key].file}.nc`;
-}
+const urlFor = (cycleT, lead, file) =>
+  `${BASE}/${cycleName(cycleT)}/${cycleName(cycleT + lead * HOUR)}-PT${pad(lead, 4)}H00M-${file}.nc`;
 
-async function loadField(cycleT, lead, key) {
-  const url = urlFor(cycleT, lead, key);
+async function loadField(cycleT, lead, file) {
+  const url = urlFor(cycleT, lead, file);
   if (cache.has(url)) return cache.get(url);
   let res = await fetch(url);
   if (res.status === 404) { // un 404 puntual se reintenta una vez antes de darlo por no disponible
@@ -91,8 +95,79 @@ async function loadField(cycleT, lead, key) {
   }
 }
 
+// Una pasada de una variable: {main} o, para el viento, {dir, speed}.
+async function loadSet(cycleT, lead, cfg) {
+  const files = cfg.files ?? { main: cfg.file };
+  const entries = await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loadField(cycleT, lead, f)]));
+  return Object.fromEntries(entries);
+}
+
+// ---------- Cálculo de capas ----------
+// Devuelve, en la unidad mostrada: a, b (campos de las vistas A y B), diff (campo de la vista de diferencia)
+// y, para el viento, las flechas de A y B ya en ejes de la malla.
+function compute(cfg, SA, SB) {
+  const kind = cfg.kind ?? "scalar";
+  const grid = (SA.main ?? SA.speed);
+  const n = grid.nx * grid.ny;
+  const diff = new Float32Array(n);
+
+  if (kind === "scalar") {
+    const a = new Float32Array(n), b = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      a[i] = SA.main.data[i] * cfg.factor + cfg.offset;
+      b[i] = SB.main.data[i] * cfg.factor + cfg.offset;
+      diff[i] = (SA.main.data[i] - SB.main.data[i]) * cfg.factor;
+    }
+    return { kind, grid, a, b, diff };
+  }
+
+  // Viento: dirección = de dónde sopla (grados, sentido horario desde el norte).
+  const sA = SA.speed.data, sB = SB.speed.data, dA = SA.dir.data, dB = SB.dir.data;
+  for (let i = 0; i < n; i++) {
+    if (kind === "wdiff") {
+      diff[i] = Math.min(sA[i], sB[i]) < cfg.minSpeed ? NaN : ((dA[i] - dB[i] + 540) % 360) - 180; // circular, (−180, 180]
+    } else {
+      const uA = -sA[i] * Math.sin(dA[i] * RAD), vA = -sA[i] * Math.cos(dA[i] * RAD);
+      const uB = -sB[i] * Math.sin(dB[i] * RAD), vB = -sB[i] * Math.cos(dB[i] * RAD);
+      diff[i] = Math.hypot(uA - uB, vA - vB); // invariante frente al giro de ejes
+    }
+  }
+  return {
+    kind, grid, a: sA, b: sB, diff,
+    dirA: dA, dirB: dB,
+    arrows: { A: arrowField(grid, sA, dA), B: arrowField(grid, sB, dB) },
+  };
+}
+
+// Media por bloques de `step` celdas del viento (componentes este/norte verdaderas), girada a ejes de la malla
+// si la dirección va respecto al norte verdadero. Devuelve flechas {px, py, u, v, s} en píxeles del lienzo.
+const convergence = makeConvergence();
+function arrowField(grid, speed, dir) {
+  const { nx, ny, x0, dx, y0, dy } = grid, step = ARROWS.step;
+  const out = [];
+  for (let bj = 0; bj + step <= ny; bj += step) {
+    for (let bi = 0; bi + step <= nx; bi += step) {
+      let su = 0, sv = 0, ss = 0;
+      for (let j = bj; j < bj + step; j++) {
+        for (let i = bi; i < bi + step; i++) {
+          const k = j * nx + i, s = speed[k], th = dir[k] * RAD;
+          su -= s * Math.sin(th); sv -= s * Math.cos(th); ss += s;
+        }
+      }
+      const cnt = step * step, ci = bi + step / 2, cj = bj + step / 2;
+      let u = su / cnt, v = sv / cnt;
+      if (WIND_DIR_REFERENCE === "north") {
+        const g = convergence(x0 + ci * dx, y0 + cj * dy);
+        [u, v] = [u * Math.cos(g) + v * Math.sin(g), -u * Math.sin(g) + v * Math.cos(g)];
+      }
+      out.push({ px: ci + 0.5, py: ny - cj - 0.5, u, v, s: ss / cnt, m: Math.hypot(u, v) });
+    }
+  }
+  return out;
+}
+
 // ---------- Estado / UI ----------
-const state = { view: "diff", A: null, B: null, token: 0, geom: null };
+const state = { view: "diff", cfg: null, layers: null, SA: null, SB: null, token: 0 };
 
 function defaultCycle() {
   const now = Date.now();
@@ -137,14 +212,15 @@ async function update() {
   $("info").innerHTML = `Validez <b>${fmt(c.tA + c.lead * HOUR)}</b> · A: <b>${fmt(c.tA)} +${c.lead} h</b> · B: <b>${fmt(c.tB)} +${c.leadB} h</b>`;
   setStatus("Descargando…");
   try {
-    const [A, B] = await Promise.all([loadField(c.tA, c.lead, c.key), loadField(c.tB, c.leadB, c.key)]);
+    const [SA, SB] = await Promise.all([loadSet(c.tA, c.lead, c.cfg), loadSet(c.tB, c.leadB, c.cfg)]);
     if (token !== state.token) return;
-    state.A = A; state.B = B; state.cfg = c.cfg;
+    state.cfg = c.cfg;
+    state.layers = compute(c.cfg, SA, SB);
     setStatus("");
     render();
   } catch (e) {
     if (token !== state.token) return;
-    state.A = state.B = null;
+    state.layers = null;
     clearCanvas();
     setStatus(e.message, true);
   }
@@ -164,65 +240,81 @@ async function getCoast() { return coast ??= await (await fetch("coast.json")).j
 const laea = makeLaea();
 
 // Rango de la vista secuencial (A y B), en la unidad mostrada.
-function seqRange(cfg, both) {
-  const conv = v => v * cfg.factor + cfg.offset;
+function seqRange(cfg, a, b) {
   const q = cfg.seq ?? "auto";
+  const both = new Float32Array(a.length + b.length); both.set(a); both.set(b, a.length);
   let lo, hi;
-  if (q === "auto") { lo = conv(percentile(both, 0.02)); hi = conv(percentile(both, 0.98)); }
-  else { lo = q.lo; hi = q.hi === "p99" ? Math.max(conv(percentile(both, 0.995)), q.hiMin ?? 0) : q.hi; }
+  if (q === "auto") { lo = percentile(both, 0.02); hi = percentile(both, 0.98); }
+  else { lo = q.lo; hi = q.hi === "p99" ? Math.max(percentile(both, 0.995), q.hiMin ?? 0) : q.hi; }
   if (!(hi > lo)) hi = lo + 1;
   return [lo, hi];
 }
 
 function render() {
-  const { A, B, cfg } = state;
-  if (!A || !B) return;
-  const { nx, ny } = A;
+  const { cfg, layers } = state;
+  if (!layers) return;
+  const { nx, ny } = layers.grid;
   for (const cv of [map, over]) { cv.width = nx; cv.height = ny; }
   const pal = palettes();
   const view = state.view;
-  const n = nx * ny;
-  const diff = new Float32Array(n); // en la unidad mostrada
-  for (let i = 0; i < n; i++) diff[i] = (A.data[i] - B.data[i]) * cfg.factor;
 
   let vals, lo, hi, table;
   if (view === "diff") {
     const s = Number($("scale").value);
-    vals = diff; lo = -s; hi = s; table = pal.diff;
+    vals = layers.diff; table = layers.kind === "vector" ? pal.seq : pal.diff; // el módulo no tiene signo
+    [lo, hi] = layers.kind === "vector" ? [0, s] : [-s, s];
   } else {
     // misma escala para A y B, para que sean comparables entre sí
-    vals = (view === "a" ? A : B).data;
-    const both = new Float32Array(2 * n); both.set(A.data); both.set(B.data, n);
-    [lo, hi] = seqRange(cfg, both); table = pal.seq;
+    vals = view === "a" ? layers.a : layers.b;
+    [lo, hi] = seqRange(cfg, layers.a, layers.b); table = pal.seq;
   }
   const img = new ImageData(nx, ny);
   const px = img.data;
   for (let r = 0; r < ny; r++) {
     const j = ny - 1 - r; // la malla va de sur a norte
     for (let i = 0; i < nx; i++) {
-      let v = vals[j * nx + i];
+      const v = vals[j * nx + i];
+      if (!Number.isFinite(v)) continue; // p. ej. viento flojo en la diferencia de dirección
       const o = (r * nx + i) * 4;
-      if (!Number.isFinite(v)) continue;
-      if (view !== "diff") v = v * cfg.factor + cfg.offset;
       const t = Math.min(255, Math.max(0, Math.round((v - lo) / (hi - lo) * 255))) * 4;
       px[o] = table[t]; px[o + 1] = table[t + 1]; px[o + 2] = table[t + 2]; px[o + 3] = 255;
     }
   }
   map.getContext("2d").putImageData(img, 0, 0);
-  state.geom = { A, B, diff, cfg };
   drawOverlay();
-  drawLegend(cfg, view, lo, hi, table);
-  drawStats(cfg, diff);
+  drawLegend(cfg, layers, view, lo, hi, table);
+  drawStats(cfg, layers);
+}
+
+function drawArrows(ctx, list, color, width) {
+  const st = arrowStyle(), maxLen = ARROWS.step * 0.95;
+  const path = new Path2D();
+  for (const a of list) {
+    if (a.s < ARROWS.minSpeed || a.m < 1e-6) continue;
+    const len = ARROWS.minLen + (maxLen - ARROWS.minLen) * Math.min(a.s / ARROWS.vref, 1);
+    const ux = a.u / a.m, uy = -a.v / a.m; // el eje y del lienzo crece hacia abajo
+    const hx = a.px + ux * len / 2, hy = a.py + uy * len / 2, tx = a.px - ux * len / 2, ty = a.py - uy * len / 2;
+    const h = Math.min(5, len * 0.4), ang = Math.atan2(uy, ux);
+    path.moveTo(tx, ty); path.lineTo(hx, hy);
+    for (const s of [-1, 1]) {
+      path.moveTo(hx, hy);
+      path.lineTo(hx - h * Math.cos(ang + s * 0.45), hy - h * Math.sin(ang + s * 0.45));
+    }
+  }
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.strokeStyle = st.halo; ctx.lineWidth = width + 2.4; ctx.stroke(path);
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(path);
 }
 
 async function drawOverlay() {
-  const { A } = state;
-  if (!A) return;
+  const { layers } = state;
+  if (!layers) return;
+  const g = layers.grid;
   const ctx = over.getContext("2d");
   ctx.clearRect(0, 0, over.width, over.height);
   const toPx = (lon, lat) => {
     const [x, y] = laea(lon, lat);
-    return [(x - A.x0) / A.dx + 0.5, A.ny - 1 - (y - A.y0) / A.dy + 0.5];
+    return [(x - g.x0) / g.dx + 0.5, g.ny - 1 - (y - g.y0) / g.dy + 0.5];
   };
   const ink = dark() ? "230,233,237" : "27,31,36", ring = dark() ? "#1a1a19" : "#ffffff";
   ctx.lineJoin = "round";
@@ -232,6 +324,11 @@ async function drawOverlay() {
     line.forEach(([lon, lat], k) => { const [x, y] = toPx(lon, lat); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke();
   }
+  if (layers.arrows) {
+    const st = arrowStyle();
+    if (state.view !== "a") drawArrows(ctx, layers.arrows.B, st.B, 1.8);
+    if (state.view !== "b") drawArrows(ctx, layers.arrows.A, st.A, 1.6);
+  }
   for (const [lon, lat] of CITIES) {
     const [x, y] = toPx(lon, lat);
     ctx.beginPath(); ctx.arc(x, y, 5.5, 0, 7); ctx.fillStyle = ring; ctx.fill();
@@ -239,24 +336,36 @@ async function drawOverlay() {
   }
 }
 
-function drawLegend(cfg, view, lo, hi, table) {
+function drawLegend(cfg, layers, view, lo, hi, table) {
   const lg = $("legend");
   lg.innerHTML = "";
-  const unit = cfg.unit;
   const left = document.createElement("span"), right = document.createElement("span");
   const bar = document.createElement("canvas"); bar.width = 256; bar.height = 1;
   const id = new ImageData(256, 1);
   id.data.set(table.subarray(0, 1024));
   bar.getContext("2d").putImageData(id, 0, 0);
-  if (view === "diff") {
-    left.textContent = `${lo} ${unit} · A ${cfg.neg}`; right.textContent = `A ${cfg.pos} · +${hi} ${unit}`;
+  const vu = cfg.viewUnit ?? cfg.unit, vd = cfg.viewDecimals ?? cfg.decimals;
+  if (view !== "diff") {
+    left.textContent = `${lo.toFixed(vd)} ${vu}`; right.textContent = `${hi.toFixed(vd)} ${vu}`;
+  } else if (layers.kind === "vector") {
+    left.textContent = `0 ${cfg.unit}`; right.textContent = `${hi} ${cfg.unit} · módulo de A − B`;
   } else {
-    left.textContent = `${lo.toFixed(cfg.decimals)} ${unit}`; right.textContent = `${hi.toFixed(cfg.decimals)} ${unit}`;
+    left.textContent = `${lo} ${cfg.unit} · A ${cfg.neg}`; right.textContent = `A ${cfg.pos} · +${hi} ${cfg.unit}`;
   }
   lg.append(left, bar, right);
+  if (layers.arrows) {
+    const st = arrowStyle(), k = document.createElement("span");
+    k.style.cssText = "flex-basis:100%;max-width:none";
+    const sw = c => `<b style="display:inline-block;width:18px;height:3px;background:${c};vertical-align:middle;border-radius:2px"></b>`;
+    const what = view === "a" ? `${sw(st.A)} A` : view === "b" ? `${sw(st.B)} B` : `${sw(st.A)} A · ${sw(st.B)} B`;
+    k.innerHTML = `Flechas: ${what} — hacia donde sopla; longitud ∝ velocidad (máx. ${ARROWS.vref} m/s), cada ${ARROWS.step * 2} km`;
+    lg.style.flexWrap = "wrap";
+    lg.append(k);
+  } else lg.style.flexWrap = "";
 }
 
-function drawStats(cfg, diff) {
+function drawStats(cfg, layers) {
+  const diff = layers.diff;
   let n = 0, sum = 0, sq = 0, ab = 0, mx = -Infinity, mn = Infinity, gt = 0;
   for (const d of diff) {
     if (!Number.isFinite(d)) continue;
@@ -265,32 +374,58 @@ function drawStats(cfg, diff) {
   }
   const dec = cfg.decimals + 1, u = ` ${cfg.unit}`;
   const sg = v => (v > 0 ? "+" : "") + v.toFixed(dec);
-  const tiles = [
-    ["Diferencia media", sg(sum / n) + u],
-    ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
-    ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
-    [`Máx. A ${cfg.pos}`, sg(mx) + u],
-    [`Máx. A ${cfg.neg}`, sg(mn) + u],
-    [`Celdas con |Δ| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
-  ];
+  let tiles;
+  if (layers.kind === "vector") {
+    const mean = arr => { let s = 0; for (const v of arr) s += v; return s / arr.length; };
+    const vu = ` ${cfg.viewUnit ?? cfg.unit}`;
+    tiles = [
+      ["Módulo medio de A − B", (sum / n).toFixed(dec) + u],
+      ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
+      ["Máximo", mx.toFixed(dec) + u],
+      [`Celdas con |A − B| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
+      ["Velocidad media A", mean(layers.a).toFixed(dec) + vu],
+      ["Velocidad media B", mean(layers.b).toFixed(dec) + vu],
+    ];
+  } else {
+    tiles = [
+      ["Diferencia media", sg(sum / n) + u],
+      ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
+      ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
+      [`Máx. A ${cfg.pos}`, sg(mx) + u],
+      [`Máx. A ${cfg.neg}`, sg(mn) + u],
+      [`Celdas con |Δ| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
+    ];
+    if (layers.kind === "wdiff") {
+      // los extremos de una diferencia circular (±180°) no informan: se sustituyen por la cobertura de la máscara
+      tiles.splice(3, 2);
+      tiles.push(["Celdas con viento ≥ " + cfg.minSpeed + " m/s en A y B", `${(100 * n / diff.length).toFixed(1)} %`]);
+    }
+  }
   $("stats").innerHTML = tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
 }
 
 // ---------- Tooltip ----------
 const tip = $("tip");
 over.addEventListener("pointermove", e => {
-  const g = state.geom;
-  if (!g) return;
+  const { cfg, layers } = state;
+  if (!layers) return;
+  const g = layers.grid;
   const r = over.getBoundingClientRect();
-  const i = Math.floor((e.clientX - r.left) / r.width * g.A.nx), row = Math.floor((e.clientY - r.top) / r.height * g.A.ny);
-  const j = g.A.ny - 1 - row;
-  if (i < 0 || j < 0 || i >= g.A.nx || j >= g.A.ny) { tip.style.display = "none"; return; }
-  const k = j * g.A.nx + i;
-  const c = g.cfg, dec = c.decimals;
-  const a = g.A.data[k] * c.factor + c.offset, b = g.B.data[k] * c.factor + c.offset, d = g.diff[k];
-  tip.innerHTML = `Δ <b>${d > 0 ? "+" : ""}${d.toFixed(dec)} ${c.unit}</b><br>A <b>${a.toFixed(dec)}</b> · B <b>${b.toFixed(dec)}</b> ${c.unit}`;
+  const i = Math.floor((e.clientX - r.left) / r.width * g.nx), row = Math.floor((e.clientY - r.top) / r.height * g.ny);
+  const j = g.ny - 1 - row;
+  if (i < 0 || j < 0 || i >= g.nx || j >= g.ny) { tip.style.display = "none"; return; }
+  const k = j * g.nx + i;
+  const d = layers.diff[k], dec = cfg.decimals, sgn = d > 0 ? "+" : "";
+  const dtxt = Number.isFinite(d) ? `${sgn}${d.toFixed(dec)} ${cfg.unit}` : "sin dato (viento flojo)";
+  if (layers.kind === "scalar") {
+    tip.innerHTML = `Δ <b>${dtxt}</b><br>A <b>${layers.a[k].toFixed(dec)}</b> · B <b>${layers.b[k].toFixed(dec)}</b> ${cfg.unit}`;
+  } else {
+    const vd = cfg.viewDecimals ?? cfg.decimals, vu = cfg.viewUnit ?? cfg.unit;
+    const line = (n, s, dir) => `${n} <b>${s.toFixed(vd)}</b> ${vu} · <b>${Math.round(dir)}°</b>`;
+    tip.innerHTML = `${layers.kind === "vector" ? "|A − B|" : "Δ dirección"} <b>${dtxt}</b><br>${line("A", layers.a[k], layers.dirA[k])}<br>${line("B", layers.b[k], layers.dirB[k])}`;
+  }
   tip.style.display = "block";
-  tip.style.left = Math.min(e.clientX + 14, innerWidth - 150) + "px";
+  tip.style.left = Math.min(e.clientX + 14, innerWidth - 190) + "px";
   tip.style.top = e.clientY + 14 + "px";
 });
 over.addEventListener("pointerleave", () => { tip.style.display = "none"; });

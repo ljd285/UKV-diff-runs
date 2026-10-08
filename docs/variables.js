@@ -14,6 +14,13 @@
 //   leads             "any": existe cada hora de 0 a 120 h.
 //                     "std": cada hora hasta +54 h y cada 3 h de +57 h a +120 h (lo habitual).
 //   minLead           Primer alcance disponible (por defecto 0).
+//   kind              "scalar" (por defecto): un fichero, campo escalar.
+//                     "wdiff":  viento; mapa = diferencia circular de dirección (°), enmascarada donde el viento es flojo.
+//                     "vector": viento; mapa = módulo de la diferencia vectorial |A − B| (secuencial, desde 0).
+//                     En ambos hay flechas de A y B, y las vistas A/B muestran la velocidad de fondo.
+//   files             Para kind != "scalar": {dir, speed} en lugar de `file`.
+//   viewUnit/viewDecimals  Unidad y decimales de las vistas A/B y del tooltip si difieren de `unit` (viento: m/s).
+//   minSpeed          (wdiff) velocidad mínima (m/s) en ambas pasadas para dibujar la diferencia de dirección.
 //   seq               Rango de la vista secuencial (A y B): "auto" (percentiles 2–98 de ambas pasadas),
 //                     o {lo, hi}; hi puede ser "p99" (percentil 99,5 con mínimo `hiMin`) o un número.
 //
@@ -53,6 +60,20 @@ export const VARIABLES = {
     pos: "más fuerte", neg: "más débil", seq: { lo: 0, hi: "p99", hiMin: 5 },
   },
 
+  wdir: {
+    label: "Dirección del viento (diferencia)", group: "wind", kind: "wdiff", leads: "std",
+    files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
+    unit: "°", factor: 1, offset: 0, decimals: 0, viewUnit: "m/s", viewDecimals: 1,
+    scales: [15, 30, 45, 90], scale: 30, thresh: 30, minSpeed: 1.5,
+    pos: "rolada en sentido horario", neg: "rolada en sentido antihorario", seq: { lo: 0, hi: "p99", hiMin: 5 },
+  },
+  wvec: {
+    label: "Viento (vectores A y B)", group: "wind", kind: "vector", leads: "std",
+    files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
+    unit: "m/s", factor: 1, offset: 0, decimals: 1,
+    scales: [1, 2, 3, 5, 10], scale: 3, thresh: 2, pos: "", neg: "", seq: { lo: 0, hi: "p99", hiMin: 5 },
+  },
+
   rh: {
     label: "Humedad relativa", group: "moist", file: "relative_humidity_at_screen_level", leads: "std",
     unit: "%", factor: 100, offset: 0, decimals: 0, scales: [5, 10, 20, 30], scale: 10, thresh: 10,
@@ -70,6 +91,14 @@ export const VARIABLES = {
     pos: "más lluvia", neg: "menos lluvia", seq: { lo: 0, hi: "p99", hiMin: 0.5 },
   },
 };
+
+// Flechas de viento: una cada `step` celdas (media del bloque), longitud proporcional a la velocidad hasta `vref` (m/s).
+export const ARROWS = { step: 48, vref: 20, minSpeed: 0.5, minLen: 5 };
+
+// Referencia de la dirección en los ficheros: "north" (norte verdadero) o "grid" (norte de la malla).
+// Los datos lo sugieren (balance geostrófico en 24 campos: pendiente −8 ± 1 °/1000 km; 0 si fuera "grid", ≈ −13 si "north"),
+// pero no está documentado en los ficheros. Con "north" las flechas se giran la convergencia de meridianos (hasta ±13°).
+export const WIND_DIR_REFERENCE = "north";
 
 export const DEFAULT_VARIABLE = "t";
 export const MAX_LEAD = 120;
