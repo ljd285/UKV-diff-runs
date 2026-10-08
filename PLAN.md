@@ -144,3 +144,12 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **La salida anterior solo se descarga si hace falta** (cuando se muestra ella o la diferencia). Sin ella, el desplegable "Comparar con" queda deshabilitado y el alcance llega a +120 h (con comparación, hasta +108 h por el desfase).
 - **Estadísticas:** mínimo, media y máximo de cada mapa en bruto mostrado (en el viento, de la velocidad) y, si se muestra la diferencia, sus estadísticos de siempre.
 - **Flechas** de cada salida solo cuando su panel (o la diferencia) está visible; la clave lo refleja.
+
+## Filtro de valores (8 oct)
+
+- **Qué hace:** fila "Filtro de valores" con operador (Sin filtro, Menor que, Mayor que, Entre), uno o dos umbrales en la unidad de la variable y atajos por variable. Las celdas que no cumplen quedan sin pintar. No descarga nada: solo repinta.
+- **Dónde actúa:** en los mapas en bruto, sobre el valor de esa salida (en el viento, sobre la velocidad); en el mapa de **Diferencia**, en las celdas donde **cumple alguna de las dos salidas** (así se ve dónde cambió una situación que aparecía en una y no en la otra). También oculta las flechas del viento donde la velocidad no cumple.
+- **Estadísticas:** mínimo, media y máximo solo de las celdas que cumplen, y el porcentaje de celdas que cumplen el filtro.
+- **Título de cada panel:** indica el filtro activo (línea reservada: activarlo no desplaza los mapas).
+- **Al cambiar de variable el filtro se reinicia** (otra unidad). Un segundo clic en un atajo activo lo quita.
+- **Atajos** (`FILTER_PRESETS` en `docs/variables.js`): puntos de partida habituales, p. ej. helada < 0 °C, > 20 y > 30 °C, rachas > 40/50/60 mph, precipitación > 0,1 / 1 / 4 mm/h. Se editan o amplían allí sin tocar el visor.

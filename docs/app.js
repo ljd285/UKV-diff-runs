@@ -186,6 +186,7 @@ const state = {
   cfg: null, layers: null, meta: null, token: 0,
   region: DEFAULT_REGION, shown: { a: true, b: false, diff: false },
   images: {}, arrowCache: new Map(),
+  filter: { op: "none", v1: NaN, v2: NaN }, // filtro de valores: se muestran solo las celdas que cumplen
 };
 let panels = [];
 
@@ -288,11 +289,13 @@ function getImage(kind) {
     [lo, hi] = cfg.range; table = paletteLUT(pal.map); center = cfg.center ?? null;
   }
   const img = new ImageData(nx, ny), px = img.data;
+  const m = filterMatcher(); // filtro: en la diferencia basta con que cumpla alguna de las dos salidas
   for (let r = 0; r < ny; r++) {
     const j = ny - 1 - r; // la malla va de sur a norte
     for (let i = 0; i < nx; i++) {
-      const v = vals[j * nx + i];
+      const k = j * nx + i, v = vals[k];
       if (!Number.isFinite(v)) continue; // p. ej. viento flojo en la diferencia de dirección
+      if (m && !(kind === "diff" ? m(layers.a[k]) || m(layers.b[k]) : m(v))) continue;
       const o = (r * nx + i) * 4;
       const t = lutIndex(v, lo, hi, center);
       px[o] = table[t]; px[o + 1] = table[t + 1]; px[o + 2] = table[t + 2]; px[o + 3] = 255;
@@ -327,6 +330,25 @@ function getCrop(g) {
   x0 = Math.max(0, x0 - padX); x1 = Math.min(g.nx, x1 + padX);
   y0 = Math.max(0, y0 - padY); y1 = Math.min(g.ny, y1 + padY);
   return { sx: x0, sy: y0, sw: x1 - x0, sh: y1 - y0 };
+}
+
+// ---------- Filtro de valores ----------
+// Devuelve una función (valor en la unidad mostrada) → ¿cumple?, o null si no hay filtro activo.
+function filterMatcher() {
+  const { op, v1, v2 } = state.filter;
+  if (op === "lt" && Number.isFinite(v1)) return v => v < v1;
+  if (op === "gt" && Number.isFinite(v1)) return v => v > v1;
+  if (op === "between" && Number.isFinite(v1) && Number.isFinite(v2)) {
+    const lo = Math.min(v1, v2), hi = Math.max(v1, v2);
+    return v => v >= lo && v <= hi;
+  }
+  return null;
+}
+const num = v => String(v).replace(".", ",");
+function filterText() {
+  if (!filterMatcher() || !state.cfg) return null;
+  const { op, v1, v2 } = state.filter, u = state.cfg.viewUnit ?? state.cfg.unit;
+  return op === "lt" ? `< ${num(v1)} ${u}` : op === "gt" ? `> ${num(v1)} ${u}` : `${num(Math.min(v1, v2))}–${num(Math.max(v1, v2))} ${u}`;
 }
 
 // La costa se carga antes de dibujar nada, para que drawPanel sea síncrono (sin carreras al redimensionar).
@@ -373,7 +395,10 @@ function drawPanel(p) {
 
   // Título y leyenda
   const meta = p.kind === "diff" ? "última − anterior" : state.meta[p.kind];
-  p.caption.innerHTML = `<b>${NAME[p.kind]}</b> <span>· ${meta}</span>`;
+  const ft = filterText();
+  p.caption.innerHTML = `<b>${NAME[p.kind]}</b> <span>· ${meta}</span>` +
+    // línea reservada aunque no haya filtro: así activarlo o quitarlo no desplaza los mapas
+    `<span class="flt">${ft ? `${p.kind === "diff" ? "donde alguna salida cumple" : "solo"}: ${ft}` : ""}</span>`;
   drawLegend(p, cfg, L, img);
 }
 
@@ -386,8 +411,9 @@ function drawArrows(ctx, which, color, width, crop, f, dpr, cssW) {
     state.arrowCache.set(key, arrowField(g, which === "A" ? L.rawA : L.rawB, which === "A" ? L.dirA : L.dirB, step));
   }
   const maxLen = ARROWS.spacing * 0.95 * dpr, minLen = ARROWS.minLen * dpr;
-  const path = new Path2D();
+  const path = new Path2D(), m = filterMatcher(), vf = state.cfg.viewFactor ?? 1;
   for (const a of state.arrowCache.get(key)) {
+    if (m && !m(a.s * vf)) continue;
     const x = (a.px - crop.sx) * f, y = (a.py - crop.sy) * f;
     if (x < -maxLen || y < -maxLen || x > crop.sw * f + maxLen || y > crop.sh * f + maxLen) continue;
     if (a.s < ARROWS.minSpeed || a.m < 1e-6) continue;
@@ -441,53 +467,69 @@ function drawArrowKey() {
   el.innerHTML = `Flechas: ${parts}${both} — hacia donde sopla; longitud ∝ velocidad (máx. ${Math.round(ARROWS.vref * (state.cfg.viewFactor ?? 1))} ${state.cfg.viewUnit ?? "m/s"})`;
 }
 
-function diffTiles(cfg, layers) {
+function diffTiles(cfg, layers, m) {
   const diff = layers.diff;
-  let n = 0, sum = 0, sq = 0, ab = 0, mx = -Infinity, mn = Infinity, gt = 0;
-  for (const d of diff) {
+  let pass = 0, n = 0, sum = 0, sq = 0, ab = 0, mx = -Infinity, mn = Infinity, gt = 0;
+  for (let k = 0; k < diff.length; k++) {
+    if (m && !(m(layers.a[k]) || m(layers.b[k]))) continue;
+    pass++;
+    const d = diff[k];
     if (!Number.isFinite(d)) continue;
     n++; sum += d; sq += d * d; ab += Math.abs(d);
     if (d > mx) mx = d; if (d < mn) mn = d; if (Math.abs(d) > cfg.thresh) gt++;
   }
   const dec = cfg.decimals + 1, u = ` ${cfg.unit}`;
-  const sg = v => signed(v, dec);
-  if (layers.kind === "vector") {
-    return [
+  const sg = v => signed(v, dec), pc = (x, t) => t ? `${(100 * x / t).toFixed(1)} %` : "—";
+  let tiles;
+  if (n === 0) tiles = [["Diferencia", "sin celdas"]];
+  else if (layers.kind === "vector") {
+    tiles = [
       ["Módulo medio de la diferencia", (sum / n).toFixed(dec) + u],
       ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
       ["Máximo", mx.toFixed(dec) + u],
-      [`Celdas con diferencia > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
+      [`Celdas con diferencia > ${cfg.thresh}${u}`, pc(gt, n)],
     ];
+  } else {
+    tiles = [
+      ["Diferencia media", sg(sum / n) + u],
+      ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
+      ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
+      [`Última ${cfg.pos} (máx.)`, sg(mx) + u],
+      [`Última ${cfg.neg} (máx.)`, sg(mn) + u],
+      [`Celdas con |Δ| > ${cfg.thresh}${u}`, pc(gt, n)],
+    ];
+    if (layers.kind === "wdiff") {
+      // los extremos de una diferencia circular (±180°) no informan: se sustituyen por la cobertura de la máscara
+      tiles.splice(3, 2);
+      tiles.push([`Celdas con viento ≥ ${Math.round(cfg.minSpeed * cfg.viewFactor)} ${cfg.viewUnit} en ambas salidas`, pc(n, pass)]);
+    }
   }
-  const tiles = [
-    ["Diferencia media", sg(sum / n) + u],
-    ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
-    ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
-    [`Última ${cfg.pos} (máx.)`, sg(mx) + u],
-    [`Última ${cfg.neg} (máx.)`, sg(mn) + u],
-    [`Celdas con |Δ| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
-  ];
-  if (layers.kind === "wdiff") {
-    // los extremos de una diferencia circular (±180°) no informan: se sustituyen por la cobertura de la máscara
-    tiles.splice(3, 2);
-    tiles.push([`Celdas con viento ≥ ${Math.round(cfg.minSpeed * cfg.viewFactor)} ${cfg.viewUnit} en ambas salidas`, `${(100 * n / diff.length).toFixed(1)} %`]);
-  }
+  if (m) tiles.push(["Celdas que cumplen el filtro (alguna salida)", pc(pass, diff.length)]);
   return tiles;
 }
 
-// Mínimo, media y máximo de los datos de cada mapa en bruto que se muestra.
-function rawTiles(cfg, layers, arr, name) {
-  let n = 0, sum = 0, mn = Infinity, mx = -Infinity;
-  for (const v of arr) { if (!Number.isFinite(v)) continue; n++; sum += v; if (v < mn) mn = v; if (v > mx) mx = v; }
+// Mínimo, media y máximo de los datos de cada mapa en bruto mostrado (solo de las celdas que cumplen el filtro).
+function rawTiles(cfg, layers, arr, name, m) {
+  let n = 0, total = 0, sum = 0, mn = Infinity, mx = -Infinity;
+  for (const v of arr) {
+    if (!Number.isFinite(v)) continue;
+    total++;
+    if (m && !m(v)) continue;
+    n++; sum += v; if (v < mn) mn = v; if (v > mx) mx = v;
+  }
   const vd = cfg.viewDecimals ?? cfg.decimals, vu = ` ${cfg.viewUnit ?? cfg.unit}`, w = layers.wind ? " · velocidad" : "";
-  return [[`${name}${w} · mínimo`, mn.toFixed(vd) + vu], [`${name}${w} · media`, (sum / n).toFixed(vd) + vu], [`${name}${w} · máximo`, mx.toFixed(vd) + vu]];
+  const tiles = n === 0
+    ? [[`${name}${w}`, "sin celdas"]]
+    : [[`${name}${w} · mínimo`, mn.toFixed(vd) + vu], [`${name}${w} · media`, (sum / n).toFixed(vd) + vu], [`${name}${w} · máximo`, mx.toFixed(vd) + vu]];
+  if (m) tiles.push([`${name} · celdas que cumplen el filtro`, `${(100 * n / total).toFixed(1)} %`]);
+  return tiles;
 }
 
 function drawStats(cfg, layers) {
-  const tiles = [];
-  if (state.shown.a) tiles.push(...rawTiles(cfg, layers, layers.a, NAME.a));
-  if (state.shown.b && layers.b) tiles.push(...rawTiles(cfg, layers, layers.b, NAME.b));
-  if (state.shown.diff && layers.diff) tiles.push(...diffTiles(cfg, layers));
+  const m = filterMatcher(), tiles = [];
+  if (state.shown.a) tiles.push(...rawTiles(cfg, layers, layers.a, NAME.a, m));
+  if (state.shown.b && layers.b) tiles.push(...rawTiles(cfg, layers, layers.b, NAME.b, m));
+  if (state.shown.diff && layers.diff) tiles.push(...diffTiles(cfg, layers, m));
   $("stats").innerHTML = tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
 }
 
@@ -526,6 +568,58 @@ function onMove(e, canvas, kind) {
   tip.style.top = e.clientY + 14 + "px";
 }
 
+// ---------- Interfaz del filtro ----------
+const currentCfg = () => VARIABLES[$("variable").value];
+
+// Refleja state.filter en los controles: unidad, paso, atajos de la variable y qué entradas están activas.
+function syncFilterUI() {
+  const cfg = currentCfg(), f = state.filter, step = Math.pow(10, -cfg.decimals);
+  $("fop").value = f.op;
+  $("funit").textContent = cfg.viewUnit ?? cfg.unit;
+  for (const [id, v, on] of [["fv1", f.v1, f.op !== "none"], ["fv2", f.v2, f.op === "between"]]) {
+    const el = $(id);
+    el.disabled = !on; el.step = step;
+    el.value = on && Number.isFinite(v) ? v : "";
+  }
+  $("fpresets").innerHTML = (cfg.filterPresets ?? []).map((pr, i) => {
+    const on = f.op === pr.op && f.v1 === pr.v && (pr.op !== "between" || f.v2 === pr.v2);
+    return `<button data-i="${i}" aria-pressed="${on}">${pr.label}</button>`;
+  }).join("");
+}
+
+// Aplica el filtro: no hay que descargar nada, solo repintar mapas, flechas y estadísticas.
+function applyFilter() {
+  state.images = {};
+  if (!state.layers) return;
+  drawAll();
+  drawStats(state.cfg, state.layers);
+}
+
+function initFilter() {
+  let timer;
+  $("fop").addEventListener("input", () => {
+    const cfg = currentCfg(), op = $("fop").value, f = state.filter;
+    if (op !== "none" && !Number.isFinite(f.v1)) f.v1 = cfg.filterPresets?.[0]?.v ?? cfg.range[0]; // valor de partida
+    if (op === "between" && !Number.isFinite(f.v2)) f.v2 = Math.max(f.v1 + 1, cfg.range[1]);
+    f.op = op;
+    syncFilterUI(); applyFilter();
+  });
+  for (const id of ["fv1", "fv2"]) {
+    $(id).addEventListener("input", () => {
+      state.filter.v1 = $("fv1").valueAsNumber; state.filter.v2 = $("fv2").valueAsNumber;
+      clearTimeout(timer); timer = setTimeout(() => { applyFilter(); $("fpresets").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", "false")); }, 120);
+    });
+  }
+  $("fpresets").addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    const pr = currentCfg().filterPresets[Number(b.dataset.i)];
+    const same = state.filter.op === pr.op && state.filter.v1 === pr.v;
+    state.filter = same ? { op: "none", v1: NaN, v2: NaN } : { op: pr.op, v1: pr.v, v2: pr.v2 ?? NaN }; // otro clic lo quita
+    syncFilterUI(); applyFilter();
+  });
+}
+
 // ---------- Eventos ----------
 function init() {
   const t = defaultCycle(), d = new Date(t);
@@ -542,8 +636,13 @@ function init() {
   syncControls();
   refreshLeads(24);
   buildPanels();
+  syncFilterUI(); initFilter();
 
-  $("variable").addEventListener("input", () => { const keep = currentLead(); refreshLeads(keep); update(); });
+  $("variable").addEventListener("input", () => {
+    const keep = currentLead(); refreshLeads(keep);
+    state.filter = { op: "none", v1: NaN, v2: NaN }; syncFilterUI(); // otra variable, otra unidad: el filtro se reinicia
+    update();
+  });
   $("offset").addEventListener("input", () => { refreshLeads(currentLead()); update(); });
   for (const id of ["date", "run"]) $(id).addEventListener("input", update);
   // El deslizador actualiza la etiqueta al instante y descarga al soltar/pausar, no en cada paso.
