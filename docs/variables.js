@@ -13,6 +13,8 @@
 //                     `diff` es divergente (negativo → gris → positivo); para kind "vector" es secuencial (módulo, desde 0).
 //   center            (opcional) valor en la unidad mostrada donde cae el centro de una paleta `map` divergente
 //                     (p. ej. presión centrada en 1004 hPa); el rango [min, max] no tiene por qué ser simétrico.
+//   filterPresets     Atajos del filtro de valores: [{label, op: "lt" | "gt" | "between", v, v2?}] en la unidad de los mapas
+//                     (`viewUnit ?? unit`). En el visor el filtro admite además cualquier umbral escrito a mano.
 //   range             Rango FIJO [min, max] de los mapas de cada salida, en la unidad mostrada (viewUnit para el viento).
 //   thresh            Umbral para la estadística "celdas con |Δ| > umbral" (en `unit`).
 //   pos, neg          Texto de "A es más ..." para diferencias positivas / negativas.
@@ -122,3 +124,21 @@ export function validLeads(cfg, offset) {
   for (let h = 0; h + offset <= MAX_LEAD; h++) if (leadExists(cfg, h) && leadExists(cfg, h + offset)) out.push(h);
   return out;
 }
+
+// Atajos del filtro de valores. El filtro actúa sobre el valor de cada mapa (en el viento, sobre la velocidad)
+// y se puede ajustar a mano en el visor; estos son solo puntos de partida habituales.
+const FILTER_PRESETS = {
+  t:    [{ label: "Helada (< 0 °C)", op: "lt", v: 0 }, { label: "> 20 °C", op: "gt", v: 20 }, { label: "> 30 °C", op: "gt", v: 30 }],
+  tmax: [{ label: "Día de hielo (< 0 °C)", op: "lt", v: 0 }, { label: "> 25 °C", op: "gt", v: 25 }, { label: "> 30 °C", op: "gt", v: 30 }],
+  tmin: [{ label: "Helada (< 0 °C)", op: "lt", v: 0 }, { label: "Helada fuerte (< −5 °C)", op: "lt", v: -5 }, { label: "> 15 °C", op: "gt", v: 15 }],
+  td:   [{ label: "< 0 °C", op: "lt", v: 0 }, { label: "> 16 °C (bochorno)", op: "gt", v: 16 }],
+  pmsl: [{ label: "< 1000 hPa", op: "lt", v: 1000 }, { label: "< 990 hPa", op: "lt", v: 990 }, { label: "> 1025 hPa", op: "gt", v: 1025 }],
+  wind: [{ label: "> 20 mph", op: "gt", v: 20 }, { label: "> 30 mph", op: "gt", v: 30 }, { label: "> 40 mph", op: "gt", v: 40 }],
+  gust: [{ label: "> 40 mph", op: "gt", v: 40 }, { label: "> 50 mph", op: "gt", v: 50 }, { label: "> 60 mph", op: "gt", v: 60 }],
+  wdir: [{ label: "Viento > 20 mph", op: "gt", v: 20 }, { label: "Viento > 30 mph", op: "gt", v: 30 }],
+  wvec: [{ label: "Viento > 20 mph", op: "gt", v: 20 }, { label: "Viento > 30 mph", op: "gt", v: 30 }],
+  rh:   [{ label: "< 40 %", op: "lt", v: 40 }, { label: "> 90 %", op: "gt", v: 90 }, { label: "> 95 %", op: "gt", v: 95 }],
+  cloud:[{ label: "Despejado (< 20 %)", op: "lt", v: 20 }, { label: "Cubierto (> 80 %)", op: "gt", v: 80 }],
+  precip: [{ label: "> 0,1 mm/h", op: "gt", v: 0.1 }, { label: "> 1 mm/h", op: "gt", v: 1 }, { label: "> 4 mm/h (fuerte)", op: "gt", v: 4 }],
+};
+for (const [k, presets] of Object.entries(FILTER_PRESETS)) VARIABLES[k].filterPresets = presets;

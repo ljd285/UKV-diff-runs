@@ -24,7 +24,15 @@
   select, input, button { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
   button { cursor:pointer; }
   button:hover { border-color:var(--accent); }
-  select:disabled { opacity:.5; cursor:not-allowed; }
+  select:disabled, input:disabled { opacity:.5; cursor:not-allowed; }
+  .fctl { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .fctl input[type=number] { width:88px; }
+  #funit { color:var(--muted); font-size:.85rem; min-width:2.5em; }
+  .presets { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .presets button { padding:3px 8px; font-size:.8rem; }
+  .presets button[aria-pressed=true] { background:var(--accent); color:#fff; border-color:var(--accent); }
+  figure.map figcaption .flt { display:block; color:var(--accent); }
+  figure.map figcaption .flt:empty::before { content:"\00a0"; }
   input[type=range] { padding:0; width:min(420px,80vw); }
   .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
   .seg button { border:0; border-radius:0; background:var(--bg); }
@@ -102,6 +110,22 @@
       </label>
       <button id="prev" aria-label="Alcance anterior">◀</button>
       <button id="next" aria-label="Alcance siguiente">▶</button>
+    </div>
+    <div class="row" id="filterRow">
+      <label>Filtro de valores
+        <span class="fctl">
+          <select id="fop" aria-label="Tipo de filtro">
+            <option value="none">Sin filtro</option>
+            <option value="lt">Menor que</option>
+            <option value="gt">Mayor que</option>
+            <option value="between">Entre</option>
+          </select>
+          <input type="number" id="fv1" step="any" aria-label="Valor del filtro" disabled>
+          <input type="number" id="fv2" step="any" aria-label="Segundo valor del filtro" disabled>
+          <span id="funit"></span>
+        </span>
+      </label>
+      <span id="fpresets" class="presets" role="group" aria-label="Atajos del filtro"></span>
     </div>
     <div class="info" id="info"></div>
     <div class="info" id="status" role="status"></div>
