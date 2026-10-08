@@ -31,6 +31,8 @@ Comparar visualmente las pasadas 03Z y 15Z del UKV (fuente: TheWeatherOutlook) p
 
 **Actualización (sonda ejecutada en navegador, 8 oct 07:55Z):** verificado que el prefijo es `15` / `03` (`3_` no existe) y que el rocío es `dew_point`. Alcances 24 y 36 existen para ambas pasadas y las tres variables; todas las imágenes miden 690x840. Un `Last-Modified` observado: 05:44Z (≈2 h 45 min tras la 03Z; falta saber a qué fichero corresponde y confirmar el de la 15Z). Confirmado por el usuario: Tmáx/Tmín son de una hora concreta (no de un periodo de 24 h), así que emparejar por alcance es correcto.
 
+**Prueba de runner (8 oct 08:10Z, [run 37748058621](https://github.com/ljd285/UKV-diff-runs/actions/runs/37748058621)):** un runner `ubuntu-latest` recibe también HTTP 403 de Cloudflare en los 3 ficheros probados (con User-Agent identificado). **El archivo automático desde GitHub Actions no es viable sin permiso de TWO.** Alternativas: pedir permiso/allowlist a TWO, usar Met Office DataHub, o un runner self-hosted en IP residencial (p. ej. un equipo propio).
+
 ### Fase 1 — Visor estático (MVP)
 - `docs/index.html` (HTML/JS sin build) con: selector de variable, deslizador de validez (calcula alcance de cada pasada), vista lado a lado, modo superponer con opacidad, y 3 botones de ejemplo.
 - Fallback de nombres de fichero y campo manual para dew point.
