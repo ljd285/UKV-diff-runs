@@ -46,7 +46,8 @@ export const VARIABLES = {
   t:    { ...KELVIN, label: "Temperatura a 1,5 m", group: "temp", file: "temperature_at_screen_level", leads: "any" },
   tmax: { ...KELVIN, label: "Temperatura máxima (última hora)", group: "temp", file: "temperature_at_screen_level_max-PT01H", leads: "any", minLead: 1, range: [-5, 35] },
   tmin: { ...KELVIN, label: "Temperatura mínima (última hora)", group: "temp", file: "temperature_at_screen_level_min-PT01H", leads: "any", minLead: 1, range: [-10, 20] },
-  td:   { ...KELVIN, label: "Punto de rocío", group: "temp", file: "temperature_of_dew_point_at_screen_level", leads: "std", range: [-10, 20], palette: { map: "clasica", diff: "naranja-verde" } },
+  td:   { ...KELVIN, label: "Punto de rocío", group: "temp", file: "temperature_of_dew_point_at_screen_level", leads: "std", range: [-10, 20], palette: { map: "clasica", diff: "naranja-verde" },
+        pos: "más húmeda", neg: "más seca" }, // naranja = más seco (punto de rocío más bajo), verde = más húmedo
 
   pmsl: {
     label: "Presión a nivel del mar", group: "pres", file: "pressure_at_mean_sea_level", leads: "std",
