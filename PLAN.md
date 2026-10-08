@@ -7,27 +7,29 @@ Comparar visualmente las pasadas 03Z y 15Z del UKV (fuente: TheWeatherOutlook) p
 - `ukv.aspx` es solo un envoltorio; el gráfico es un PNG estático:
   `https://www.theweatheroutlook.com/charts/ukv/{pasada}_{alcance}_{variable}.png`
 - Pasadas: 03Z y 15Z. Alcances: 1–54 h cada hora, 57–120 h cada 3 h.
-- Verificado: `max_temp`, `min_temp`. **Sin verificar**: nombre de dew point (`dew_point` / `dewpoint` / `dew`) y prefijo de la pasada de madrugada (`3_` vs `03_`).
+- Verificado (sonda en navegador): `max_temp`, `min_temp`, `dew_point`; prefijos `15` y `03`.
 - Los ficheros se **sobrescriben**: no hay histórico. Solo existen la última pasada de cada hora.
 - Emparejar por validez: la 03Z necesita alcance = alcance_15Z + 12 h.
 
 ### Ejemplos de emparejamiento (15Z de hoy como última pasada)
 | Variable | Validez | 15Z | 03Z |
 |---|---|---|---|
-| Tmáx | 15Z día siguiente | `15_24_max_temp` | `3_36_max_temp` |
-| Tmín | 06Z día siguiente | `15_15_min_temp` | `3_27_min_temp` |
-| Rocío | 12Z, +2 días | `15_45_{dew}` | `3_57_{dew}` |
+| Tmáx | 15Z día siguiente | `15_24_max_temp` | `03_36_max_temp` |
+| Tmín | 06Z día siguiente | `15_15_min_temp` | `03_27_min_temp` |
+| Rocío | 12Z, +2 días | `15_45_dew_point` | `03_57_dew_point` |
 
 ## Fases
 
 ### Fase 0 — Verificaciones (30 min, antes de escribir código)
-1. Probar con `curl -I` los nombres de dew point y el prefijo `3_`/`03_`.
+1. ~~Probar nombres de dew point y prefijo~~ (hecho con la sonda, ver abajo).
 2. Comprobar a qué hora UTC se actualiza cada pasada (para fijar el cron).
 3. Comprobar si las imágenes de Tmáx/Tmín son valores instantáneos o agregados del periodo (cambia la interpretación de "validez").
 4. Revisar las condiciones de uso de TWO antes de archivar sus imágenes; si no permiten redistribución, el repo/Pages debe ser privado o solo enlazar.
 
 **Resultado (8 oct):** desde el entorno cloud de Claude Code, `theweatheroutlook.com` responde 403 de Cloudflare ("Sorry, you have been blocked") a cualquier petición, con cualquier nombre de fichero. Es un bloqueo de WAF por IP/tráfico automatizado, no un problema de nombres. No se intenta esquivar. Los puntos 1–3 quedan sin verificar y hay que comprobarlos desde un navegador normal (ver `scripts/probe.html` si se añade) o pidiendo permiso a TWO.
 **Implicación para la Fase 2:** los runners de GitHub Actions también son IPs de datacenter y es probable que se bloqueen igual. Antes de construir el archivo hay que probar un workflow mínimo, o contactar con TWO, o usar el DataHub del Met Office.
+
+**Actualización (sonda ejecutada en navegador, 8 oct 07:55Z):** verificado que el prefijo es `15` / `03` (`3_` no existe) y que el rocío es `dew_point`. Alcances 24 y 36 existen para ambas pasadas y las tres variables; todas las imágenes miden 690x840. Un `Last-Modified` observado: 05:44Z (≈2 h 45 min tras la 03Z; falta saber a qué fichero corresponde y confirmar el de la 15Z). Pendiente: si Tmáx/Tmín son de hora concreta o de periodo (mirar las miniaturas).
 
 ### Fase 1 — Visor estático (MVP)
 - `docs/index.html` (HTML/JS sin build) con: selector de variable, deslizador de validez (calcula alcance de cada pasada), vista lado a lado, modo superponer con opacidad, y 3 botones de ejemplo.
