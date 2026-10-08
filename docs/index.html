@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Diferencias entre salidas UKV</title>
+<title>Visor de datos UKV</title>
 <style>
   :root {
     --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5d6670; --line:#d8dde3; --accent:#256abf;
@@ -24,6 +24,7 @@
   select, input, button { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
   button { cursor:pointer; }
   button:hover { border-color:var(--accent); }
+  select:disabled { opacity:.5; cursor:not-allowed; }
   input[type=range] { padding:0; width:min(420px,80vw); }
   .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
   .seg button { border:0; border-radius:0; background:var(--bg); }
@@ -62,8 +63,8 @@
 </head>
 <body>
 <main>
-  <h1>Diferencias entre salidas UKV</h1>
-  <p class="sub">Met Office UKV 2 km (datos abiertos en AWS). Diferencia entre la última salida y una salida anterior para la misma hora de validez.</p>
+  <h1>Visor de datos UKV</h1>
+  <p class="sub">Salidas del modelo Met Office UKV 2 km (datos abiertos en AWS). Muestra los datos de una salida y, si quieres, los compara con una salida anterior para la misma hora de validez.</p>
 
   <div class="panel">
     <div class="row">
@@ -89,9 +90,9 @@
       </label>
       <label>Mapas
         <span class="seg" id="panels" role="group" aria-label="Mapas a mostrar">
-          <button data-k="a" aria-pressed="false">Última salida</button>
+          <button data-k="a" aria-pressed="true">Última salida</button>
           <button data-k="b" aria-pressed="false">Salida anterior</button>
-          <button data-k="diff" aria-pressed="true">Diferencia</button>
+          <button data-k="diff" aria-pressed="false">Diferencia</button>
         </span>
       </label>
     </div>
