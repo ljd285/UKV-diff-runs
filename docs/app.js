@@ -8,6 +8,7 @@ const BASE = "https://met-office-atmospheric-model-data.s3-eu-west-2.amazonaws.c
 const AVAILABLE_AFTER_H = 4.5; // el ciclo completo se termina de subir ~4 h 15 min después de su hora
 const HOUR = 3600e3;
 const RAD = Math.PI / 180;
+const LANDSEA_FILE = "landsea_mask"; // 1 = tierra, 0 = mar; igual en todas las salidas, como el relieve
 const NAME = { a: "Última salida", b: "Salida anterior", diff: "Diferencia" };
 
 // Ciudades de referencia (solo punto, sin nombre).
@@ -188,7 +189,8 @@ const state = {
   images: {}, arrowCache: new Map(),
   filter: { op: "none", v1: NaN, v2: NaN }, // filtro de valores: se muestran solo las celdas que cumplen
   elev: { min: NaN, max: NaN },             // filtro de altitud del terreno: [min, max) en metros
-  orog: null, elevMask: null,               // altura del terreno (m) y máscara 0/1 del filtro de altitud
+  surface: "all",                           // filtro de superficie: "all" | "land" | "sea"
+  orog: null, land: null, cellMask: null,               // altura del terreno (m) y máscara 0/1 del filtro de altitud
 };
 let panels = [];
 
@@ -234,6 +236,13 @@ const fmt = t => { const d = new Date(t); return `${d.getUTCFullYear()}-${pad(d.
 // Solo errores: mientras carga no se muestra texto (cambiaba la altura de la página y desplazaba el mapa).
 function setStatus(msg = "") { const s = $("status"); s.textContent = msg; s.className = "info" + (msg ? " err" : ""); }
 
+// Descarga (alcance 0 de la salida elegida) lo que aún no se tenga; un fallo no impide ver la variable.
+async function loadStatics(tA, skipOrog) {
+  const get = file => loadField(tA, 0, file).then(f => f.data).catch(() => null);
+  const [orog, land] = await Promise.all([!state.orog && !skipOrog ? get(VARIABLES.orog.file) : null, !state.land ? get(LANDSEA_FILE) : null]);
+  return { orog, land };
+}
+
 async function update() {
   const c = readControls();
   const token = ++state.token;
@@ -246,12 +255,14 @@ async function update() {
   $("maps").classList.add("loading");
   try {
     const needB = needsB();
-    // La altura del terreno es igual en todas las salidas: se descarga una vez por sesión (para el filtro de altitud y el tooltip).
-    const orogP = !state.orog && !c.cfg.static ? loadField(c.tA, 0, VARIABLES.orog.file).then(f => f.data).catch(() => null) : null;
-    const [SA, SB, orog] = await Promise.all([loadSet(c.tA, c.lead, c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null, orogP]);
+    // El relieve y la máscara tierra/mar son iguales en todas las salidas: se descargan una vez por sesión
+    // (para los filtros de altitud y superficie y para el tooltip).
+    const staticP = loadStatics(c.tA, c.cfg.static);
+    const [SA, SB, st] = await Promise.all([loadSet(c.tA, c.lead, c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null, staticP]);
     if (token !== state.token) return;
-    if (!state.orog) state.orog = c.cfg.static ? SA.main.data : orog;
-    rebuildElevMask();
+    if (!state.orog) state.orog = c.cfg.static ? SA.main.data : st.orog; // si es la variable "relieve", ya está en SA
+    if (!state.land) state.land = st.land;
+    rebuildCellMask();
     syncElevUI();
     state.cfg = c.cfg;
     state.layers = compute(c.cfg, SA, SB);
@@ -305,7 +316,7 @@ function getImage(kind) {
     [lo, hi] = cfg.range; table = paletteLUT(pal.map); center = cfg.center ?? null;
   }
   const img = new ImageData(nx, ny), px = img.data;
-  const m = filterMatcher(), em = state.elevMask; // filtro: en la diferencia basta con que cumpla alguna de las dos salidas
+  const m = filterMatcher(), em = state.cellMask; // filtro: en la diferencia basta con que cumpla alguna de las dos salidas
   for (let r = 0; r < ny; r++) {
     const j = ny - 1 - r; // la malla va de sur a norte
     for (let i = 0; i < nx; i++) {
@@ -368,19 +379,29 @@ function filterText() {
   return op === "lt" ? `< ${num(v1)} ${u}` : op === "gt" ? `> ${num(v1)} ${u}` : `${num(Math.min(v1, v2))}–${num(Math.max(v1, v2))} ${u}`;
 }
 
-// ---------- Filtro de altitud del terreno ----------
+// ---------- Filtros de terreno: altitud y superficie (tierra / mar) ----------
 function elevText() {
-  const { min, max } = state.elev, a = Number.isFinite(min), b = Number.isFinite(max);
-  return a && b ? `terreno ${min}–${max} m` : a ? `terreno ≥ ${min} m` : b ? `terreno < ${max} m` : null;
+  const { min, max } = state.elev, a = Number.isFinite(min), b = Number.isFinite(max), parts = [];
+  if (state.surface !== "all") parts.push(state.surface === "land" ? "tierra" : "mar");
+  if (a || b) parts.push(a && b ? `terreno ${min}–${max} m` : a ? `terreno ≥ ${min} m` : `terreno < ${max} m`);
+  return parts.length ? parts.join(" · ") : null;
 }
-// Máscara 0/1 por celda con la altura del terreno en [min, max). Null si no hay filtro o aún no se ha cargado el relieve.
-function rebuildElevMask() {
-  const { min, max } = state.elev;
-  if (!state.orog || !(Number.isFinite(min) || Number.isFinite(max))) { state.elevMask = null; return; }
+// Máscara 0/1 por celda: altura del terreno en [min, max) y/o solo tierra / solo mar. Null si no hay ningún filtro activo.
+// Un filtro cuyos datos aún no se han cargado se ignora (se rehace al terminar la carga).
+function rebuildCellMask() {
+  const { min, max } = state.elev, surf = state.surface;
+  const useElev = !!state.orog && (Number.isFinite(min) || Number.isFinite(max));
+  const useSurf = !!state.land && surf !== "all";
+  if (!useElev && !useSurf) { state.cellMask = null; return; }
   const lo = Number.isFinite(min) ? min : -Infinity, hi = Number.isFinite(max) ? max : Infinity;
-  const m = new Uint8Array(state.orog.length);
-  for (let k = 0; k < m.length; k++) { const h = state.orog[k]; m[k] = h >= lo && h < hi ? 1 : 0; }
-  state.elevMask = m;
+  const m = new Uint8Array((state.orog ?? state.land).length);
+  for (let k = 0; k < m.length; k++) {
+    let ok = true;
+    if (useElev) { const h = state.orog[k]; ok = h >= lo && h < hi; }
+    if (ok && useSurf) ok = (state.land[k] >= 0.5) === (surf === "land");
+    m[k] = ok ? 1 : 0;
+  }
+  state.cellMask = m;
 }
 
 // La costa se carga antes de dibujar nada, para que drawPanel sea síncrono (sin carreras al redimensionar).
@@ -444,7 +465,7 @@ function drawArrows(ctx, which, color, width, crop, f, dpr, cssW) {
     state.arrowCache.set(key, arrowField(g, which === "A" ? L.rawA : L.rawB, which === "A" ? L.dirA : L.dirB, step));
   }
   const maxLen = ARROWS.spacing * 0.95 * dpr, minLen = ARROWS.minLen * dpr;
-  const path = new Path2D(), m = filterMatcher(), vf = state.cfg.viewFactor ?? 1, em = state.elevMask;
+  const path = new Path2D(), m = filterMatcher(), vf = state.cfg.viewFactor ?? 1, em = state.cellMask;
   for (const a of state.arrowCache.get(key)) {
     if (m && !m(a.s * vf)) continue;
     if (em && !em[Math.round(g.ny - a.py - 0.5) * g.nx + Math.round(a.px - 0.5)]) continue; // altitud de la celda de la flecha
@@ -562,7 +583,7 @@ function rawTiles(cfg, layers, arr, name, okv, filtered) {
 }
 
 function drawStats(cfg, layers) {
-  const m = filterMatcher(), em = state.elevMask, filtered = !!(m || em), tiles = [];
+  const m = filterMatcher(), em = state.cellMask, filtered = !!(m || em), tiles = [];
   const okv = (k, v) => (!em || em[k] === 1) && (!m || m(v));
   const okd = k => (!em || em[k] === 1) && (!m || m(layers.a[k]) || m(layers.b[k]));
   if (state.shown.a) tiles.push(...rawTiles(cfg, layers, layers.a, panelName("a"), okv, filtered));
@@ -600,7 +621,10 @@ function onMove(e, canvas, kind) {
       html = `${layers.kind === "vector" ? "|Δ vector|" : "Δ dirección"} <b>${dtxt}</b><br>${line("Última", layers.a[k], layers.dirA[k])}<br>${line("Anterior", layers.b[k], layers.dirB[k])}`;
     }
   }
-  if (state.orog && !cfg.static) html += `<br>${muted(`Terreno ${Math.round(state.orog[k])} m`)}`;
+  if (state.orog && !cfg.static) {
+    const sup = state.land ? ` · ${state.land[k] >= 0.5 ? "tierra" : "mar"}` : "";
+    html += `<br>${muted(`Terreno ${Math.round(state.orog[k])} m${sup}`)}`;
+  }
   tip.innerHTML = html;
   tip.style.display = "block";
   tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
@@ -676,6 +700,7 @@ function fillElevSelects() {
 
 function syncElevUI() {
   const { min, max } = state.elev, ready = !!state.orog;
+  $("surf").value = state.surface; $("surf").disabled = !state.land;
   $("emin").value = Number.isFinite(min) ? String(min) : "";
   $("emax").value = Number.isFinite(max) ? String(max) : "";
   for (const id of ["emin", "emax"]) $(id).disabled = !ready;
@@ -685,9 +710,9 @@ function syncElevUI() {
   });
 }
 
-// Cambia el filtro de altitud: no descarga nada, solo recalcula la máscara y repinta.
+// Cambia el filtro de altitud o de superficie: no descarga nada, solo recalcula la máscara y repinta.
 function applyElev() {
-  rebuildElevMask(); syncElevUI(); applyFilter();
+  rebuildCellMask(); syncElevUI(); applyFilter();
 }
 
 function initElev() {
@@ -698,6 +723,7 @@ function initElev() {
     state.elev = { min, max }; applyElev();
   };
   $("emin").addEventListener("input", read); $("emax").addEventListener("input", read);
+  $("surf").addEventListener("input", () => { state.surface = $("surf").value; applyElev(); });
   $("epresets").addEventListener("click", e => {
     const b = e.target.closest("button");
     if (!b || b.disabled) return;
