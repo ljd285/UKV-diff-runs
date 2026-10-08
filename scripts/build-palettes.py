@@ -27,6 +27,8 @@ SEQUENTIAL = {
                     dark=["#1c1c1c", "#636363", "#bdbdbd", "#f5f5f5"]),
     "radar":   dict(label="Radar", stops=["#eef2f6", "#a7dcae", "#4cb85a", "#f4e04d", "#f2902f", "#d8261d", "#a01a94"],
                     dark=["#262b31", "#3f7f4c", "#4cb85a", "#f4e04d", "#f2902f", "#ff5a4a", "#d36bd0"]),
+    "relieve": dict(label="Relieve", stops=["#d7e8d4", "#9ccb86", "#e3d77a", "#c99a52", "#8c5e3c", "#f4f1ec"],
+                    dark=["#1c3324", "#3c6d3f", "#9a8f3a", "#a8733a", "#7a5a45", "#e8e4dc"]),
     "clasica": dict(label="Clásica meteorológica", stops=["#3b1f8f", "#2a6fd6", "#35b6c8", "#5cc86a", "#f1e04a", "#f08a2a", "#d7261e", "#7a0c2a"]),
 }
 # Divergentes: del extremo negativo, pasando por un gris neutro, al positivo. Versión clara y oscura.

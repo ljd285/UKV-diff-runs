@@ -24,10 +24,11 @@
   select, input, button { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
   button { cursor:pointer; }
   button:hover { border-color:var(--accent); }
-  select:disabled, input:disabled { opacity:.5; cursor:not-allowed; }
+  select:disabled, input:disabled, button:disabled { opacity:.5; cursor:not-allowed; }
   .fctl { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .fctl input[type=number] { width:88px; }
-  #funit { color:var(--muted); font-size:.85rem; min-width:2.5em; }
+  #funit, #eunit, .fctl .sep { color:var(--muted); font-size:.85rem; }
+  #funit { min-width:2.5em; }
   .presets { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .presets button { padding:3px 8px; font-size:.8rem; }
   .presets button[aria-pressed=true] { background:var(--accent); color:#fff; border-color:var(--accent); }
@@ -126,6 +127,24 @@
         </span>
       </label>
       <span id="fpresets" class="presets" role="group" aria-label="Atajos del filtro"></span>
+    </div>
+    <div class="row" id="elevRow">
+      <label>Superficie
+        <select id="surf" aria-label="Filtro de superficie">
+          <option value="all">Tierra y mar</option>
+          <option value="land">Solo tierra</option>
+          <option value="sea">Solo mar</option>
+        </select>
+      </label>
+      <label>Altitud del terreno
+        <span class="fctl">
+          <select id="emin" aria-label="Altitud mínima del terreno" title="Desde (incluida)"></select>
+          <span class="sep">a</span>
+          <select id="emax" aria-label="Altitud máxima del terreno" title="Hasta (sin incluir)"></select>
+          <span id="eunit">m</span>
+        </span>
+      </label>
+      <span id="epresets" class="presets" role="group" aria-label="Atajos de altitud"></span>
     </div>
     <div class="info" id="info"></div>
     <div class="info" id="status" role="status"></div>

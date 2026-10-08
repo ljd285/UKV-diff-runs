@@ -158,6 +158,25 @@ export const SEQUENTIAL = {
       "#d36bd0"
     ]
   },
+  "relieve": {
+    "label": "Relieve",
+    "stops": [
+      "#d7e8d4",
+      "#9ccb86",
+      "#e3d77a",
+      "#c99a52",
+      "#8c5e3c",
+      "#f4f1ec"
+    ],
+    "dark": [
+      "#1c3324",
+      "#3c6d3f",
+      "#9a8f3a",
+      "#a8733a",
+      "#7a5a45",
+      "#e8e4dc"
+    ]
+  },
   "clasica": {
     "label": "Clásica meteorológica",
     "stops": [

@@ -153,3 +153,17 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Título de cada panel:** indica el filtro activo (línea reservada: activarlo no desplaza los mapas).
 - **Al cambiar de variable el filtro se reinicia** (otra unidad). Un segundo clic en un atajo activo lo quita.
 - **Atajos** (`FILTER_PRESETS` en `docs/variables.js`): puntos de partida habituales, p. ej. helada < 0 °C, > 20 y > 30 °C, rachas > 40/50/60 mph, precipitación > 0,1 / 1 / 4 mm/h. Se editan o amplían allí sin tocar el visor.
+
+## Altura del terreno y filtro de altitud (8 oct)
+
+- **Datos:** `height_of_orography` (`surface_altitude`, metros, malla del modelo). Es **idéntico en todas las salidas y alcances** (comprobado), así que el visor lo descarga **una vez por sesión** (alcance 0) y lo reutiliza. Máximo en el dominio 3423 m (Alpes); el 68,8 % de las celdas está a 0 m (casi todo mar).
+- **Variable "Altura del terreno"** (grupo "Terreno", `static: true` en `docs/variables.js`): se muestra solo en bruto, con paleta de relieve y rango 0…1000 m; no hay comparación y se deshabilitan el alcance, "Comparar con" y los mapas de Salida anterior y Diferencia. El filtro de valores funciona sobre ella (atajos > 100/300/600/900 m).
+- **Filtro de altitud del terreno** (fila "Altitud del terreno"): "Desde X m" a "Hasta Y m" en pasos de 100 m, más atajos (< 100, 100–300, 300–600, > 600, > 900 m). Vale para **todas las variables**, se combina (Y) con el filtro de valores y afecta a mapas, flechas del viento, estadísticas y títulos. El intervalo es [desde, hasta): el límite superior no se incluye, así las bandas consecutivas no se solapan. Si se elige un máximo ≤ mínimo, se corrige a mínimo + 100 m.
+- **Tooltip:** todos los mapas (menos el del propio relieve) añaden "Terreno N m".
+
+## Máscara de tierra y mar (8 oct)
+
+- **Datos:** `landsea_mask` (`land_binary_mask`, entero 0/1, malla del modelo), igual en todas las salidas y alcances; ~0,1 MB. Solo el 31,4 % de las celdas es tierra. Se carga una vez por sesión junto al relieve.
+- **Filtro "Superficie":** Tierra y mar / Solo tierra / Solo mar. Se combina (Y) con el filtro de altitud y el de valores, y actúa sobre mapas, flechas, estadísticas y títulos. Resuelve que bandas bajas como "< 100 m" incluyeran el mar (altura 0).
+- **Tooltip:** junto al terreno indica "tierra" o "mar".
+- **Detalle de los datos:** unas pocas celdas marcadas como mar tienen altura > 0 (el 0,14 % del mar, hasta 339 m; lagos y estuarios del modelo), y el 1 % de la tierra tiene altura 0. Es lo que dice el modelo, no un fallo del visor.

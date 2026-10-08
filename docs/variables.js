@@ -15,6 +15,8 @@
 //                     (p. ej. presión centrada en 1004 hPa); el rango [min, max] no tiene por qué ser simétrico.
 //   filterPresets     Atajos del filtro de valores: [{label, op: "lt" | "gt" | "between", v, v2?}] en la unidad de los mapas
 //                     (`viewUnit ?? unit`). En el visor el filtro admite además cualquier umbral escrito a mano.
+//   static            true: no varía con la salida ni con el alcance (p. ej. el relieve). Se muestra solo en bruto,
+//                     sin comparación, y se lee siempre del alcance 0.
 //   range             Rango FIJO [min, max] de los mapas de cada salida, en la unidad mostrada (viewUnit para el viento).
 //   thresh            Umbral para la estadística "celdas con |Δ| > umbral" (en `unit`).
 //   pos, neg          Texto de "A es más ..." para diferencias positivas / negativas.
@@ -39,6 +41,7 @@ export const GROUPS = [
   { id: "wind", label: "Viento a 10 m" },
   { id: "moist", label: "Humedad y nubes" },
   { id: "precip", label: "Precipitación" },
+  { id: "terrain", label: "Terreno" },
 ];
 
 const KELVIN = { factor: 1, offset: -273.15, unit: "°C", decimals: 1, diffScale: 3, range: [-10, 30], thresh: 1, pos: "más cálida", neg: "más fría",
@@ -82,6 +85,12 @@ export const VARIABLES = {
     diffScale: 7, range: [0, 55], palette: { map: "viridis", diff: "ylorrd" }, thresh: 5, pos: "", neg: "",
   },
 
+  orog: {
+    label: "Altura del terreno", group: "terrain", file: "height_of_orography", leads: "any", static: true,
+    unit: "m", factor: 1, offset: 0, decimals: 0, diffScale: 100, range: [0, 1000], thresh: 100,
+    palette: { map: "relieve", diff: "azul-rojo" }, pos: "más alta", neg: "más baja",
+  },
+
   rh: {
     label: "Humedad relativa", group: "moist", file: "relative_humidity_at_screen_level", leads: "std",
     unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 5, range: [20, 100], palette: { map: "ylgnbu", diff: "brbg" }, thresh: 5,
@@ -120,6 +129,7 @@ export function leadExists(cfg, h) {
 
 // Alcances de la pasada A para los que existen A y B (B = A + offset horas).
 export function validLeads(cfg, offset) {
+  if (cfg.static) return [0]; // el relieve no depende del alcance
   const out = [];
   for (let h = 0; h + offset <= MAX_LEAD; h++) if (leadExists(cfg, h) && leadExists(cfg, h + offset)) out.push(h);
   return out;
@@ -139,6 +149,7 @@ const FILTER_PRESETS = {
   wvec: [{ label: "Viento > 20 mph", op: "gt", v: 20 }, { label: "Viento > 30 mph", op: "gt", v: 30 }],
   rh:   [{ label: "< 40 %", op: "lt", v: 40 }, { label: "> 90 %", op: "gt", v: 90 }, { label: "> 95 %", op: "gt", v: 95 }],
   cloud:[{ label: "Despejado (< 20 %)", op: "lt", v: 20 }, { label: "Cubierto (> 80 %)", op: "gt", v: 80 }],
+  orog: [{ label: "> 100 m", op: "gt", v: 100 }, { label: "> 300 m", op: "gt", v: 300 }, { label: "> 600 m", op: "gt", v: 600 }, { label: "> 900 m", op: "gt", v: 900 }],
   precip: [{ label: "> 0,1 mm/h", op: "gt", v: 0.1 }, { label: "> 1 mm/h", op: "gt", v: 1 }, { label: "> 4 mm/h (fuerte)", op: "gt", v: 4 }],
 };
 for (const [k, presets] of Object.entries(FILTER_PRESETS)) VARIABLES[k].filterPresets = presets;
