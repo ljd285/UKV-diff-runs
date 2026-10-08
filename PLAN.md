@@ -26,6 +26,9 @@ Comparar visualmente las pasadas 03Z y 15Z del UKV (fuente: TheWeatherOutlook) p
 3. Comprobar si las imágenes de Tmáx/Tmín son valores instantáneos o agregados del periodo (cambia la interpretación de "validez").
 4. Revisar las condiciones de uso de TWO antes de archivar sus imágenes; si no permiten redistribución, el repo/Pages debe ser privado o solo enlazar.
 
+**Resultado (8 oct):** desde el entorno cloud de Claude Code, `theweatheroutlook.com` responde 403 de Cloudflare ("Sorry, you have been blocked") a cualquier petición, con cualquier nombre de fichero. Es un bloqueo de WAF por IP/tráfico automatizado, no un problema de nombres. No se intenta esquivar. Los puntos 1–3 quedan sin verificar y hay que comprobarlos desde un navegador normal (ver `scripts/probe.html` si se añade) o pidiendo permiso a TWO.
+**Implicación para la Fase 2:** los runners de GitHub Actions también son IPs de datacenter y es probable que se bloqueen igual. Antes de construir el archivo hay que probar un workflow mínimo, o contactar con TWO, o usar el DataHub del Met Office.
+
 ### Fase 1 — Visor estático (MVP)
 - `docs/index.html` (HTML/JS sin build) con: selector de variable, deslizador de validez (calcula alcance de cada pasada), vista lado a lado, modo superponer con opacidad, y 3 botones de ejemplo.
 - Fallback de nombres de fichero y campo manual para dew point.
