@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sonda de ficheros UKV</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#1b1f24; --muted:#5d6670; --card:#fff; --line:#d8dde3; --ok:#1a7f37; --bad:#d1242f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171b; --fg:#e6e9ed; --muted:#98a2ad; --card:#1d2126; --line:#333a42; --ok:#3fb950; --bad:#f85149; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui,sans-serif; }
+  main { max-width:1000px; margin:0 auto; }
+  h1 { font-size:1.25rem; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 14px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:3px; font-size:.8rem; color:var(--muted); }
+  input, button { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  button { cursor:pointer; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th, td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); }
+  td.ok { color:var(--ok); font-weight:600; }
+  td.bad { color:var(--bad); }
+  code { word-break:break-all; }
+  textarea { width:100%; height:200px; font:12px/1.4 ui-monospace,monospace; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; }
+  #thumbs { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:8px; margin-top:8px; }
+  #thumbs figure { margin:0; font-size:.75rem; }
+  #thumbs img { width:100%; height:auto; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Sonda de ficheros UKV</h1>
+  <p class="sub">Ábrela en tu navegador (doble clic al fichero). Comprueba qué imágenes existen y copia el informe al final para pegármelo.</p>
+
+  <div class="panel">
+    <div class="row">
+      <label>Prefijos de pasada
+        <input id="runs" value="15,3,03" size="10">
+      </label>
+      <label>Alcances (h)
+        <input id="hours" value="24,36" size="12">
+      </label>
+      <label>Variables (verificadas)
+        <input id="vars" value="max_temp,min_temp" size="22">
+      </label>
+      <label>Candidatos de rocío
+        <input id="dew" value="dew_point,dewpoint,dew,dew_pt,dewpt,dew_point_temp" size="46">
+      </label>
+      <button id="go">Probar</button>
+    </div>
+    <p class="sub" style="margin:8px 0 0" id="status">Pendiente. Por defecto son 36 peticiones, de 4 en 4.</p>
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead><tr><th>Fichero</th><th>Resultado</th><th>Tamaño px</th></tr></thead>
+      <tbody id="out"></tbody>
+    </table>
+    <div id="thumbs"></div>
+  </div>
+
+  <div class="panel">
+    <b>Informe</b> <button id="copy">Copiar</button>
+    <textarea id="report" readonly></textarea>
+  </div>
+</main>
+
+<script>
+const BASE = "https://www.theweatheroutlook.com/charts/ukv/";
+const $ = id => document.getElementById(id);
+const list = id => $(id).value.split(",").map(s => s.trim()).filter(Boolean);
+
+// Una imagen se considera existente si carga y tiene dimensiones (un 403/HTML no carga como imagen).
+function probe(url) {
+  return new Promise(res => {
+    const img = new Image();
+    img.referrerPolicy = "no-referrer";
+    img.onload = () => res({ ok: img.naturalWidth > 0, w: img.naturalWidth, h: img.naturalHeight, img });
+    img.onerror = () => res({ ok: false });
+    img.src = url;
+  });
+}
+
+async function pool(items, n, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: n }, async () => {
+    while (i < items.length) { const k = i++; await fn(items[k], k); }
+  }));
+}
+
+$("go").onclick = async () => {
+  const runs = list("runs"), hours = list("hours");
+  const names = [...list("vars"), ...list("dew")];
+  const jobs = [];
+  for (const r of runs) for (const h of hours) for (const n of names) jobs.push({ r, h, n, file: `${r}_${h}_${n}.png` });
+
+  $("out").innerHTML = ""; $("thumbs").innerHTML = ""; $("report").value = "";
+  const rows = jobs.map(j => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><code>${j.file}</code></td><td>…</td><td></td>`;
+    $("out").append(tr);
+    return tr;
+  });
+  let done = 0;
+  const results = [];
+  await pool(jobs, 4, async (j, k) => {
+    const r = await probe(BASE + j.file);
+    results[k] = { ...j, ok: r.ok, size: r.ok ? `${r.w}x${r.h}` : "" };
+    rows[k].children[1].textContent = r.ok ? "existe" : "no";
+    rows[k].children[1].className = r.ok ? "ok" : "bad";
+    rows[k].children[2].textContent = results[k].size;
+    if (r.ok) {
+      const f = document.createElement("figure");
+      const im = document.createElement("img");
+      im.src = BASE + j.file; im.referrerPolicy = "no-referrer"; im.loading = "lazy";
+      const c = document.createElement("figcaption"); c.textContent = j.file;
+      f.append(im, c); $("thumbs").append(f);
+    }
+    $("status").textContent = `${++done}/${jobs.length}`;
+  });
+
+  const ok = results.filter(r => r.ok), bad = results.filter(r => !r.ok);
+  $("report").value =
+    `UKV probe ${new Date().toISOString()}\n` +
+    `UA: ${navigator.userAgent}\n` +
+    `Existen (${ok.length}):\n${ok.map(r => `  ${r.file} ${r.size}`).join("\n") || "  ninguno"}\n` +
+    `No existen (${bad.length}):\n${bad.map(r => `  ${r.file}`).join("\n") || "  ninguno"}\n`;
+  $("status").textContent = `Terminado: ${ok.length} existen, ${bad.length} no.`;
+};
+
+$("copy").onclick = () => { $("report").select(); document.execCommand("copy"); };
+</script>
+</body>
+</html>

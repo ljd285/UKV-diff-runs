@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diferencias entre pasadas UKV</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5d6670; --line:#d8dde3; --accent:#256abf;
+    --surface:#f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171b; --card:#1d2126; --ink:#e6e9ed; --muted:#98a2ad; --line:#333a42; --accent:#6da7ec; --surface:#1a1a19; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,sans-serif; }
+  main { max-width:1100px; margin:0 auto; }
+  h1 { font-size:1.25rem; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 14px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+  .row + .row { margin-top:12px; }
+  label { display:flex; flex-direction:column; gap:3px; font-size:.8rem; color:var(--muted); }
+  select, input, button { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--ink); }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  input[type=range] { padding:0; width:min(420px,80vw); }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .seg button { border:0; border-radius:0; background:var(--bg); }
+  .seg button + button { border-left:1px solid var(--line); }
+  .seg button[aria-pressed=true] { background:var(--accent); color:#fff; }
+  .info { font-size:.85rem; color:var(--muted); margin-top:10px; }
+  .info b { color:var(--ink); }
+  #status.err { color:#d1242f; }
+  .mapwrap { position:relative; background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; line-height:0; }
+  .mapwrap canvas { width:100%; height:auto; display:block; }
+  .mapwrap canvas + canvas { position:absolute; inset:0; }
+  #tip { position:fixed; pointer-events:none; z-index:5; background:var(--card); color:var(--ink); border:1px solid var(--line);
+         border-radius:6px; padding:6px 8px; font-size:.8rem; line-height:1.4; box-shadow:0 2px 8px #0003; display:none; white-space:nowrap; }
+  #tip b { font-variant-numeric:tabular-nums; }
+  .legend { display:flex; align-items:center; gap:10px; margin-top:10px; font-size:.8rem; color:var(--muted); }
+  .legend canvas { flex:1; max-width:420px; height:12px; border-radius:3px; border:1px solid var(--line); }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:12px; }
+  .stat { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:var(--card); }
+  .stat span { display:block; font-size:.75rem; color:var(--muted); }
+  .stat b { font-size:1.15rem; font-variant-numeric:tabular-nums; }
+  .foot { font-size:.8rem; color:var(--muted); margin-top:14px; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Diferencias entre pasadas UKV</h1>
+  <p class="sub">Met Office UKV 2 km (datos abiertos en AWS). Diferencia entre dos pasadas para la misma hora de validez.</p>
+
+  <div class="panel">
+    <div class="row">
+      <label>Variable
+        <select id="variable"></select>
+      </label>
+      <label>Pasada A (más reciente)
+        <span style="display:flex;gap:6px">
+          <input type="date" id="date">
+          <select id="run"><option value="03">03Z</option><option value="15">15Z</option></select>
+        </span>
+      </label>
+      <label>Comparar con
+        <select id="offset">
+          <option value="12">Pasada anterior (−12 h)</option>
+          <option value="24">Misma pasada, 1 día antes (−24 h)</option>
+          <option value="36">−36 h</option>
+          <option value="48">−48 h</option>
+        </select>
+      </label>
+      <label>Vista
+        <span class="seg" id="view">
+          <button data-v="diff" aria-pressed="true">Diferencia</button>
+          <button data-v="a" aria-pressed="false">Pasada A</button>
+          <button data-v="b" aria-pressed="false">Pasada B</button>
+        </span>
+      </label>
+      <label id="scaleWrap">Escala ±
+        <select id="scale"></select>
+      </label>
+    </div>
+    <div class="row">
+      <label>Alcance de la pasada A: <b id="leadLabel"></b>
+        <input type="range" id="lead" min="0" max="0" value="0">
+      </label>
+      <button id="prev" aria-label="Alcance anterior">◀</button>
+      <button id="next" aria-label="Alcance siguiente">▶</button>
+    </div>
+    <div class="info" id="info"></div>
+    <div class="info" id="status">Cargando…</div>
+  </div>
+
+  <div class="mapwrap" id="mapwrap">
+    <canvas id="map"></canvas>
+    <canvas id="over"></canvas>
+  </div>
+  <div class="legend" id="legend"></div>
+  <div class="stats" id="stats"></div>
+
+  <p class="foot">Diferencia = pasada A − pasada B (rojo: A más cálida, azul: A más fría). Malla del modelo en proyección Lambert azimutal; los puntos son referencias de ciudades.
+  Datos: Met Office, CC BY-SA 4.0, sin garantía. Costa: Natural Earth. <a href="images.html">Visor de imágenes de TWO</a>.</p>
+</main>
+<div id="tip"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

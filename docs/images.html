@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comparador de pasadas UKV</title>
+<style>
+  :root { --bg:#f6f7f9; --fg:#1b1f24; --muted:#5d6670; --card:#fff; --line:#d8dde3; --accent:#1f6feb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171b; --fg:#e6e9ed; --muted:#98a2ad; --card:#1d2126; --line:#333a42; --accent:#58a6ff; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui,sans-serif; }
+  main { max-width:1200px; margin:0 auto; }
+  h1 { font-size:1.25rem; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 14px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
+  .row { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:3px; font-size:.8rem; color:var(--muted); }
+  select, input, button { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  input[type=range] { padding:0; width:min(420px,80vw); }
+  .info { font-size:.85rem; color:var(--muted); margin-top:8px; }
+  .info b { color:var(--fg); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:760px) { .grid { grid-template-columns:1fr; } }
+  figure { margin:0; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px; }
+  figcaption { font-size:.85rem; margin-bottom:6px; }
+  figcaption code { color:var(--muted); word-break:break-all; }
+  img { width:100%; height:auto; display:block; background:repeating-conic-gradient(#8883 0 25%, transparent 0 50%) 0 0/16px 16px; }
+  .stack { position:relative; }
+  .stack img + img { position:absolute; inset:0; }
+  .err { color:#d1242f; font-size:.85rem; }
+  .hide { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Comparador de pasadas UKV</h1>
+  <p class="sub">Imágenes de TheWeatherOutlook · se empareja la última pasada con la anterior (12 h antes) para la misma hora de validez.</p>
+
+  <div class="panel">
+    <div class="row">
+      <label>Variable
+        <select id="variable">
+          <option value="max_temp">Temperatura máxima</option>
+          <option value="min_temp">Temperatura mínima</option>
+          <option value="dew">Punto de rocío</option>
+        </select>
+      </label>
+      <label id="dewWrap" class="hide">Nombre rocío (manual)
+        <input id="dewManual" placeholder="p. ej. dew_point">
+      </label>
+      <label>Última pasada
+        <select id="run"><option value="15">15Z</option><option value="03">03Z</option></select>
+      </label>
+      <label>Fecha (UTC)
+        <input type="date" id="date">
+      </label>
+      <label>Modo
+        <select id="mode">
+          <option value="side">Lado a lado</option>
+          <option value="overlay">Superponer</option>
+          <option value="blink">Alternar (clic)</option>
+        </select>
+      </label>
+      <label id="opWrap" class="hide">Opacidad de la pasada anterior
+        <input type="range" id="opacity" min="0" max="100" value="50">
+      </label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label>Alcance de la última pasada: <b id="hLabel"></b>
+        <input type="range" id="hslider" min="0" max="0" value="0">
+      </label>
+      <button id="prev">−</button>
+      <button id="next">+</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <span style="font-size:.8rem;color:var(--muted)">Ejemplos:</span>
+      <button data-ex="max_temp,15,24">Tmáx · 15Z+24 vs 03Z+36</button>
+      <button data-ex="min_temp,15,15">Tmín · 15Z+15 vs 03Z+27</button>
+      <button data-ex="dew,15,45">Rocío · 15Z+45 vs 03Z+57</button>
+    </div>
+    <div class="info" id="info"></div>
+  </div>
+
+  <div id="view"></div>
+
+  <p class="info">Los ficheros se sobrescriben en origen: solo hay disponible la última versión de cada pasada. Si una imagen no carga, la pasada aún no está publicada o el campo de rocío manual tiene un nombre incorrecto.</p>
+</main>
+
+<script>
+const BASE = "https://www.theweatheroutlook.com/charts/ukv/";
+const DEW_NAMES = ["dew_point"]; // verificado con la sonda (8 oct)
+const HOUR = 3600e3;
+
+// Alcances disponibles: 1–54 cada hora, 57–120 cada 3 h.
+const STEPS = [];
+for (let h = 1; h <= 54; h++) STEPS.push(h);
+for (let h = 57; h <= 120; h += 3) STEPS.push(h);
+const isStep = h => STEPS.includes(h);
+// Alcances de la última pasada cuya pareja (h+12) también existe.
+const PAIRED = STEPS.filter(h => isStep(h + 12));
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+const fmt = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}Z`;
+
+// Estima la última pasada publicada (la 03Z se vio publicada a las 05:44Z → ~3 h de retraso).
+function latestRun() {
+  const now = new Date(), h = now.getUTCHours();
+  const day = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  if (h >= 18) return { run: "15", t: day + 15 * HOUR };
+  if (h >= 6)  return { run: "03", t: day + 3 * HOUR };
+  return { run: "15", t: day - 9 * HOUR };
+}
+
+function names(variable) {
+  if (variable !== "dew") return [variable];
+  const manual = $("dewManual").value.trim();
+  return manual ? [manual] : DEW_NAMES;
+}
+function prefixes(run) { return [run]; } // verificado: "03" y "15"
+function candidates(run, h, variable) {
+  const out = [];
+  for (const p of prefixes(run)) for (const n of names(variable)) out.push(`${BASE}${p}_${h}_${n}.png`);
+  return out;
+}
+
+// Carga una imagen probando candidatos en orden.
+function loadImg(img, urls, onDone) {
+  let i = 0;
+  img.referrerPolicy = "no-referrer";
+  img.onload = () => onDone && onDone(urls[i], true);
+  img.onerror = () => {
+    i++;
+    if (i < urls.length) img.src = urls[i];
+    else onDone && onDone(urls[urls.length - 1], false);
+  };
+  img.src = urls[0];
+}
+
+function state() {
+  const variable = $("variable").value;
+  const run = $("run").value;
+  const [y, m, d] = $("date").value.split("-").map(Number);
+  const tA = Date.UTC(y, m - 1, d) + Number(run) * HOUR;
+  const hA = PAIRED[Number($("hslider").value)];
+  const tB = tA - 12 * HOUR;
+  const runB = run === "15" ? "03" : "15";
+  return { variable, run, runB, tA, tB, hA, hB: hA + 12, valid: tA + hA * HOUR };
+}
+
+function render() {
+  const s = state();
+  $("hLabel").textContent = `+${s.hA} h`;
+  $("dewWrap").classList.toggle("hide", s.variable !== "dew");
+  const mode = $("mode").value;
+  $("opWrap").classList.toggle("hide", mode !== "overlay");
+  $("info").innerHTML =
+    `Validez: <b>${fmt(new Date(s.valid))}</b> · ` +
+    `Última: <b>${fmt(new Date(s.tA))} +${s.hA} h</b> · ` +
+    `Anterior: <b>${fmt(new Date(s.tB))} +${s.hB} h</b>`;
+
+  const urlsA = candidates(s.run, s.hA, s.variable);
+  const urlsB = candidates(s.runB, s.hB, s.variable);
+  const view = $("view");
+  view.innerHTML = "";
+
+  const mk = (title, urls) => {
+    const fig = document.createElement("figure");
+    const cap = document.createElement("figcaption");
+    cap.innerHTML = `<b>${title}</b> <code></code> <span class="err"></span>`;
+    const img = document.createElement("img");
+    img.alt = title;
+    fig.append(cap, img);
+    loadImg(img, urls, (u, ok) => {
+      cap.querySelector("code").textContent = u.replace(BASE, "");
+      cap.querySelector(".err").textContent = ok ? "" : "no disponible";
+    });
+    return { fig, img };
+  };
+
+  const A = mk(`Última · ${pad(new Date(s.tA).getUTCHours())}Z +${s.hA} h`, urlsA);
+  const B = mk(`Anterior · ${pad(new Date(s.tB).getUTCHours())}Z +${s.hB} h`, urlsB);
+
+  if (mode === "side") {
+    const g = document.createElement("div");
+    g.className = "grid";
+    g.append(B.fig, A.fig);
+    view.append(g);
+  } else {
+    const fig = document.createElement("figure");
+    const cap = document.createElement("figcaption");
+    cap.textContent = mode === "overlay"
+      ? "Superposición: base = última, encima = anterior"
+      : "Clic en la imagen para alternar entre última y anterior";
+    const stack = document.createElement("div");
+    stack.className = "stack";
+    const base = document.createElement("img"), top = document.createElement("img");
+    base.alt = "Última"; top.alt = "Anterior";
+    loadImg(base, urlsA); loadImg(top, urlsB);
+    stack.append(base, top);
+    if (mode === "overlay") {
+      const set = () => top.style.opacity = $("opacity").value / 100;
+      set(); $("opacity").oninput = set;
+    } else {
+      let showTop = false;
+      top.style.opacity = 0;
+      stack.style.cursor = "pointer";
+      stack.onclick = () => { showTop = !showTop; top.style.opacity = showTop ? 1 : 0;
+        cap.textContent = `Mostrando: ${showTop ? "anterior" : "última"} (clic para alternar)`; };
+      cap.textContent = "Mostrando: última (clic para alternar)";
+    }
+    fig.append(cap, stack);
+    view.append(fig);
+  }
+}
+
+function init() {
+  $("hslider").max = PAIRED.length - 1;
+  const L = latestRun();
+  $("run").value = L.run;
+  const d = new Date(L.t);
+  $("date").value = `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`;
+  $("hslider").value = PAIRED.indexOf(24);
+
+  for (const id of ["variable", "run", "date", "mode", "dewManual", "hslider"]) $(id).addEventListener("input", render);
+  const nudge = k => { const v = Math.min(PAIRED.length - 1, Math.max(0, Number($("hslider").value) + k)); $("hslider").value = v; render(); };
+  $("prev").onclick = () => nudge(-1);
+  $("next").onclick = () => nudge(1);
+
+  document.querySelectorAll("[data-ex]").forEach(b => b.onclick = () => {
+    const [v, r, h] = b.dataset.ex.split(",");
+    $("variable").value = v; $("run").value = r; $("hslider").value = PAIRED.indexOf(Number(h));
+    render();
+  });
+  render();
+}
+init();
+</script>
+</body>
+</html>

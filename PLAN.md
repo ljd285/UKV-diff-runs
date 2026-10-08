@@ -7,24 +7,31 @@ Comparar visualmente las pasadas 03Z y 15Z del UKV (fuente: TheWeatherOutlook) p
 - `ukv.aspx` es solo un envoltorio; el gráfico es un PNG estático:
   `https://www.theweatheroutlook.com/charts/ukv/{pasada}_{alcance}_{variable}.png`
 - Pasadas: 03Z y 15Z. Alcances: 1–54 h cada hora, 57–120 h cada 3 h.
-- Verificado: `max_temp`, `min_temp`. **Sin verificar**: nombre de dew point (`dew_point` / `dewpoint` / `dew`) y prefijo de la pasada de madrugada (`3_` vs `03_`).
+- Verificado (sonda en navegador): `max_temp`, `min_temp`, `dew_point`; prefijos `15` y `03`.
 - Los ficheros se **sobrescriben**: no hay histórico. Solo existen la última pasada de cada hora.
 - Emparejar por validez: la 03Z necesita alcance = alcance_15Z + 12 h.
 
 ### Ejemplos de emparejamiento (15Z de hoy como última pasada)
 | Variable | Validez | 15Z | 03Z |
 |---|---|---|---|
-| Tmáx | 15Z día siguiente | `15_24_max_temp` | `3_36_max_temp` |
-| Tmín | 06Z día siguiente | `15_15_min_temp` | `3_27_min_temp` |
-| Rocío | 12Z, +2 días | `15_45_{dew}` | `3_57_{dew}` |
+| Tmáx | 15Z día siguiente | `15_24_max_temp` | `03_36_max_temp` |
+| Tmín | 06Z día siguiente | `15_15_min_temp` | `03_27_min_temp` |
+| Rocío | 12Z, +2 días | `15_45_dew_point` | `03_57_dew_point` |
 
 ## Fases
 
 ### Fase 0 — Verificaciones (30 min, antes de escribir código)
-1. Probar con `curl -I` los nombres de dew point y el prefijo `3_`/`03_`.
+1. ~~Probar nombres de dew point y prefijo~~ (hecho con la sonda, ver abajo).
 2. Comprobar a qué hora UTC se actualiza cada pasada (para fijar el cron).
 3. Comprobar si las imágenes de Tmáx/Tmín son valores instantáneos o agregados del periodo (cambia la interpretación de "validez").
 4. Revisar las condiciones de uso de TWO antes de archivar sus imágenes; si no permiten redistribución, el repo/Pages debe ser privado o solo enlazar.
+
+**Resultado (8 oct):** desde el entorno cloud de Claude Code, `theweatheroutlook.com` responde 403 de Cloudflare ("Sorry, you have been blocked") a cualquier petición, con cualquier nombre de fichero. Es un bloqueo de WAF por IP/tráfico automatizado, no un problema de nombres. No se intenta esquivar. Los puntos 1–3 quedan sin verificar y hay que comprobarlos desde un navegador normal (ver `scripts/probe.html` si se añade) o pidiendo permiso a TWO.
+**Implicación para la Fase 2:** los runners de GitHub Actions también son IPs de datacenter y es probable que se bloqueen igual. Antes de construir el archivo hay que probar un workflow mínimo, o contactar con TWO, o usar el DataHub del Met Office.
+
+**Actualización (sonda ejecutada en navegador, 8 oct 07:55Z):** verificado que el prefijo es `15` / `03` (`3_` no existe) y que el rocío es `dew_point`. Alcances 24 y 36 existen para ambas pasadas y las tres variables; todas las imágenes miden 690x840. Un `Last-Modified` observado: 05:44Z (≈2 h 45 min tras la 03Z; falta saber a qué fichero corresponde y confirmar el de la 15Z). Confirmado por el usuario: Tmáx/Tmín son de una hora concreta (no de un periodo de 24 h), así que emparejar por alcance es correcto.
+
+**Prueba de runner (8 oct 08:10Z, [run 37748058621](https://github.com/ljd285/UKV-diff-runs/actions/runs/37748058621)):** un runner `ubuntu-latest` recibe también HTTP 403 de Cloudflare en los 3 ficheros probados (con User-Agent identificado). **El archivo automático desde GitHub Actions no es viable sin permiso de TWO.** Alternativas: pedir permiso/allowlist a TWO, usar Met Office DataHub, o un runner self-hosted en IP residencial (p. ej. un equipo propio).
 
 ### Fase 1 — Visor estático (MVP)
 - `docs/index.html` (HTML/JS sin build) con: selector de variable, deslizador de validez (calcula alcance de cada pasada), vista lado a lado, modo superponer con opacidad, y 3 botones de ejemplo.
@@ -58,3 +65,47 @@ PLAN.md
 
 ## Siguiente paso
 Ejecutar la Fase 0 y, con los resultados, construir la Fase 1 en esta rama (`claude/modest-gauss-rvtfq7`).
+
+## Cambio de fuente: Met Office UKV 2 km en AWS Open Data (8 oct)
+
+TWO bloquea a Actions (ver arriba), así que la fuente pasa a ser el bucket abierto `met-office-atmospheric-model-data` (eu-west-2), prefijo `uk-deterministic-2km/`.
+
+**Verificado**
+- Acceso anónimo desde este entorno y desde navegador: **CORS abierto** (`Access-Control-Allow-Origin: *`, también en el listado). Una app solo JS puede leerlo sin backend ni Actions.
+- Un ciclo por hora (`YYYYMMDDTHH00Z/`), 17.557 ciclos (2 años de histórico, desde 2024-10-05). Los ciclos **03Z y 15Z llevan 120 h** (~5.000 ficheros, ~27 GB); los demás solo 12 h.
+- Fichero: `{validez}-PT{alcance}H00M-{variable}.nc`, NetCDF4/HDF5, ~1,5 MB, malla 970x1042, 2 km, proyección Lambert azimutal de áreas iguales (origen 54,9N -2,5E), valores float32 en **kelvin**.
+- Variables: `temperature_at_screen_level` (`air_temperature`), `temperature_at_screen_level_max-PT01H`, `..._min-PT01H`, `temperature_of_dew_point_at_screen_level` (`dew_point_temperature`).
+- Los ciclos completos terminan de subirse ~4 h 15 min después de la hora del ciclo (03Z -> ~07:15Z, 15Z -> ~19:15Z).
+- h5wasm (Node) lee estos ficheros correctamente.
+
+**Por verificar**
+- Que h5wasm funciona en el navegador con ficheros descargados por `fetch`.
+- Un fichero `..._max-PT01H` dio 404 con el nombre construido a mano (alcance 36); comprobar el patrón exacto de nombres de max/min.
+- Que la malla/proceso coincide con lo que dibuja TWO.
+
+**Diseño propuesto (todo JS, sin backend)**
+- Navegador: lista ciclos por S3, elige pasada A y B y alcance, descarga 2 ficheros (~3 MB), lee con h5wasm, resta B-A y pinta en `<canvas>` (diferencia, A y B) con lectura de valor al pasar el ratón y punto de interés por lat/lon (proyección LAEA a mano).
+- Opcional: Actions solo para pre-calcular resúmenes (diferencia media/máx por región) si se quiere un panel histórico rápido.
+
+## Estado del visor (8 oct)
+
+- `docs/index.html` + `docs/app.js`: mapa de diferencias A − B de todo el UKV 2 km, leyendo el bucket directamente desde el navegador (h5wasm vendorizado en `docs/vendor/h5wasm`). Variables: T 1,5 m, Tmáx/Tmín última hora, rocío. Comparación con −12/−24/−36/−48 h. Vistas: diferencia (divergente azul/rojo, escala ±1..8 °C), pasada A y pasada B (secuencial azul). Puntos de ciudades sin nombre; costa Natural Earth 50 m (`scripts/build-coast.mjs` -> `docs/coast.json`). Estadísticos: media, MAE, RMSE, extremos, % celdas |Δ|>1 °C.
+- `docs/laea.js`: proyección LAEA elipsoidal; coincide con pyproj al metro.
+- El visor de imágenes de TWO queda en `docs/images.html`.
+- Probado en Chromium con datos reales (claro y oscuro). Durante las pruebas el proxy del sandbox devolvió 404 intermitentes a ficheros que existen; el visor reintenta una vez.
+
+## Variables del visor (8 oct)
+
+Catálogo en `docs/variables.js`: temperatura 1,5 m, Tmáx/Tmín (última hora), rocío, presión a nivel del mar, viento y racha a 10 m, humedad relativa, nubosidad total y tasa de precipitación. Cada entrada define fichero, unidad y conversión, decimales, escalas ±, umbral, textos del signo y rango secuencial.
+
+**Añadir una variable:** 1) localizar el fichero con `node scripts/explore-bucket.mjs` (o el listado S3); 2) abrir un fichero y anotar unidades y rango; 3) añadir una entrada en `VARIABLES` (y un grupo en `GROUPS` si hace falta). No hay que tocar `app.js`.
+
+**Alcances:** la mayoría de variables solo existen cada hora hasta +54 h y cada 3 h de +57 a +120 h (`leads: "std"`); T 1,5 m, Tmáx y Tmín existen cada hora (Tmáx/Tmín desde +1 h). El deslizador solo ofrece alcances para los que existen A y B (corrige que el rocío daba 404 en +55, +56, +58...).
+
+**Pendiente (no incluido):** variables de nivel (presión/altura, 17-65 MB por fichero), dirección de viento (requiere diferencia circular o componentes u/v), acumulados (`-PT01H` hasta +54 h y `-PT03H` desde +57 h: el sufijo cambia con el alcance).
+
+## Viento: dirección y vectores (8 oct)
+
+- Dos variables nuevas en el grupo "Viento a 10 m": **Dirección del viento (diferencia)** (`kind: "wdiff"`, diferencia circular en °, enmascarada donde el viento es < 1,5 m/s en A o B) y **Viento (vectores A y B)** (`kind: "vector"`, módulo de A − B en m/s). Ambas cargan `wind_direction_at_10m` + `wind_speed_at_10m` (4 ficheros por actualización, ~4-5 MB).
+- Flechas de A y B en las tres vistas (A, B o ambas), una cada 96 km (media del bloque), longitud proporcional a la velocidad (máx. 20 m/s), con halo para leerse sobre cualquier fondo. Config en `ARROWS` (`docs/variables.js`).
+- **Referencia de la dirección:** `wind_from_direction` (grados, de dónde sopla). Los ficheros no dicen si va respecto al norte verdadero o al de la malla. Contraste con balance geostrófico (24 campos, 3 ciclos): pendiente del desfase viento-geostrófico frente a x = −8 ± 1 °/1000 km; esperado 0 si fuera "malla" y ≈ −13 si fuera "norte verdadero" (y la fricción empujaría hacia valores menos negativos). Se asume **norte verdadero** (`WIND_DIR_REFERENCE`) y se giran las flechas la convergencia de meridianos (±13° en los bordes; `makeConvergence` en `docs/laea.js`, proyección inversa validada contra pyproj). Cambiar a `"grid"` si se confirma lo contrario. Las diferencias (circular y módulo vectorial) no dependen de esta elección.

@@ -1,0 +1,25 @@
+name: Probe TWO access
+
+# Prueba mínima: ¿puede un runner de GitHub Actions leer las imágenes UKV?
+# Solo hace HEAD/GET de 3 ficheros e imprime estado y cabeceras. No guarda nada.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/probe.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe images
+        run: |
+          date -u
+          for f in 15_24_max_temp 03_24_max_temp 15_24_dew_point; do
+            echo "=== $f ==="
+            curl -sS -m 30 -A "ukv-diff-runs-probe (github.com/ljd285/UKV-diff-runs)" \
+              -D - -o /tmp/$f.png \
+              "https://www.theweatheroutlook.com/charts/ukv/$f.png" \
+              | grep -iE '^(HTTP|content-type|content-length|last-modified|etag|cf-ray|cf-mitigated)' || true
+            file /tmp/$f.png
+          done
