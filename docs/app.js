@@ -20,6 +20,8 @@ const CITIES = [
 
 const $ = id => document.getElementById(id);
 const pad = (n, w = 2) => String(n).padStart(w, "0");
+// Número con signo explícito; un valor que se redondea a cero no lleva signo (evita "-0.0").
+const signed = (v, dec) => { const t = v.toFixed(dec); return Number(t) === 0 ? t.replace("-", "") : v > 0 ? `+${t}` : t; };
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 
 // ---------- Colores (rampa continua por tramos) ----------
@@ -114,29 +116,33 @@ async function loadSet(cycleT, lead, cfg) {
 }
 
 // ---------- Cálculo de capas ----------
-// Devuelve, en la unidad mostrada: a, b (campos de cada salida) y diff (campo de la diferencia).
+// Devuelve, en la unidad mostrada: a (campo de la última salida) y, si hay salida anterior (SB), b y diff (diferencia).
 // Para el viento añade dirección/velocidad crudas, de las que salen las flechas.
 function compute(cfg, SA, SB) {
   const kind = cfg.kind ?? "scalar";
   const grid = (SA.main ?? SA.speed);
   const n = grid.nx * grid.ny;
-  const diff = new Float32Array(n);
+  const diff = SB ? new Float32Array(n) : null;
 
   if (kind === "scalar") {
-    const a = new Float32Array(n), b = new Float32Array(n);
+    const a = new Float32Array(n), b = SB ? new Float32Array(n) : null;
     for (let i = 0; i < n; i++) {
       a[i] = SA.main.data[i] * cfg.factor + cfg.offset;
-      b[i] = SB.main.data[i] * cfg.factor + cfg.offset;
-      diff[i] = (SA.main.data[i] - SB.main.data[i]) * cfg.factor;
+      if (SB) {
+        b[i] = SB.main.data[i] * cfg.factor + cfg.offset;
+        diff[i] = (SA.main.data[i] - SB.main.data[i]) * cfg.factor;
+      }
     }
     return { kind, grid, a, b, diff };
   }
 
   // Viento: dirección = de dónde sopla (grados, sentido horario desde el norte). Velocidades crudas en m/s.
-  const sA = SA.speed.data, sB = SB.speed.data, dA = SA.dir.data, dB = SB.dir.data;
-  const vf = cfg.viewFactor ?? 1, a = new Float32Array(n), b = new Float32Array(n);
+  const sA = SA.speed.data, dA = SA.dir.data, sB = SB?.speed.data, dB = SB?.dir.data;
+  const vf = cfg.viewFactor ?? 1, a = new Float32Array(n), b = SB ? new Float32Array(n) : null;
   for (let i = 0; i < n; i++) {
-    a[i] = sA[i] * vf; b[i] = sB[i] * vf;
+    a[i] = sA[i] * vf;
+    if (!SB) continue;
+    b[i] = sB[i] * vf;
     if (kind === "wdiff") {
       diff[i] = Math.min(sA[i], sB[i]) < cfg.minSpeed ? NaN : ((dA[i] - dB[i] + 540) % 360) - 180; // circular, (−180, 180]
     } else {
@@ -145,7 +151,7 @@ function compute(cfg, SA, SB) {
       diff[i] = Math.hypot(uA - uB, vA - vB) * cfg.factor; // invariante frente al giro de ejes
     }
   }
-  return { kind, grid, a, b, diff, dirA: dA, dirB: dB, rawA: sA, rawB: sB, wind: true };
+  return { kind, grid, a, b, diff, dirA: dA, dirB: dB ?? null, rawA: sA, rawB: sB ?? null, wind: true };
 }
 
 // Media por bloques de `step` celdas del viento (componentes este/norte verdaderas), girada a ejes de la malla
@@ -178,7 +184,7 @@ function arrowField(grid, speed, dir, step) {
 // ---------- Estado / UI ----------
 const state = {
   cfg: null, layers: null, meta: null, token: 0,
-  region: DEFAULT_REGION, shown: { a: false, b: false, diff: true },
+  region: DEFAULT_REGION, shown: { a: true, b: false, diff: false },
   images: {}, arrowCache: new Map(),
 };
 let panels = [];
@@ -192,10 +198,14 @@ function defaultCycle() {
   }
 }
 
+// La salida anterior solo se descarga (y condiciona los alcances) si se muestra ella o la diferencia.
+const needsB = () => state.shown.b || state.shown.diff;
+const syncControls = () => { $("offset").disabled = !needsB(); };
+
 let leads = []; // alcances válidos de la última salida para la variable y el desfase elegidos
 
 function refreshLeads(wanted) {
-  leads = validLeads(VARIABLES[$("variable").value], Number($("offset").value));
+  leads = validLeads(VARIABLES[$("variable").value], needsB() ? Number($("offset").value) : 0);
   $("lead").max = Math.max(0, leads.length - 1);
   let best = 0; // conserva el alcance pedido o el más cercano que exista
   leads.forEach((h, i) => { if (Math.abs(h - wanted) < Math.abs(leads[best] - wanted)) best = i; });
@@ -223,11 +233,12 @@ async function update() {
   setStatus();
   $("maps").classList.add("loading");
   try {
-    const [SA, SB] = await Promise.all([loadSet(c.tA, c.lead, c.cfg), loadSet(c.tB, c.leadB, c.cfg)]);
+    const needB = needsB();
+    const [SA, SB] = await Promise.all([loadSet(c.tA, c.lead, c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null]);
     if (token !== state.token) return;
     state.cfg = c.cfg;
     state.layers = compute(c.cfg, SA, SB);
-    state.meta = { a: `${fmt(c.tA)} +${c.lead} h`, b: `${fmt(c.tB)} +${c.leadB} h` };
+    state.meta = { a: `${fmt(c.tA)} +${c.lead} h`, b: needB ? `${fmt(c.tB)} +${c.leadB} h` : "" };
     state.images = {}; state.arrowCache.clear();
     drawAll();
     drawStats(c.cfg, state.layers);
@@ -257,7 +268,7 @@ function buildPanels() {
     fig.innerHTML = '<figcaption></figcaption><canvas></canvas><div class="legend"></div>';
     maps.append(fig);
     const canvas = fig.querySelector("canvas");
-    canvas.addEventListener("pointermove", e => onMove(e, canvas));
+    canvas.addEventListener("pointermove", e => onMove(e, canvas, kind));
     canvas.addEventListener("pointerleave", () => { $("tip").style.display = "none"; });
     return { kind, canvas, caption: fig.querySelector("figcaption"), legend: fig.querySelector(".legend") };
   });
@@ -327,7 +338,7 @@ function drawAll() {
 
 function drawPanel(p) {
   const L = state.layers;
-  if (!L) return;
+  if (!L || (p.kind !== "a" && !L.b)) return; // la salida anterior aún se está descargando
   const img = getImage(p.kind), crop = getCrop(L.grid), cfg = state.cfg;
   const cssW = p.canvas.clientWidth || 320, dpr = Math.min(window.devicePixelRatio || 1, 2);
   const W = Math.round(cssW * dpr), H = Math.round(W * crop.sh / crop.sw);
@@ -350,7 +361,7 @@ function drawPanel(p) {
   }
   if (L.wind) {
     const st = arrowStyle();
-    if (p.kind !== "a") drawArrows(ctx, "B", st.B, 1.8, crop, f, dpr, cssW);
+    if (p.kind !== "a" && L.rawB) drawArrows(ctx, "B", st.B, 1.8, crop, f, dpr, cssW);
     if (p.kind !== "b") drawArrows(ctx, "A", st.A, 1.6, crop, f, dpr, cssW);
   }
   for (const [lon, lat] of CITIES) {
@@ -419,14 +430,18 @@ function drawLegend(p, cfg, layers, img) {
 }
 
 function drawArrowKey() {
-  const el = $("arrowkey");
-  if (!state.layers?.wind) { el.innerHTML = ""; return; }
-  const st = arrowStyle();
-  const sw = c => `<b style="background:${c}"></b>`;
-  el.innerHTML = `Flechas: ${sw(st.A)} ${NAME.a} · ${sw(st.B)} ${NAME.b} (en la diferencia se muestran ambas) — hacia donde sopla; longitud ∝ velocidad (máx. ${Math.round(ARROWS.vref * (state.cfg.viewFactor ?? 1))} ${state.cfg.viewUnit ?? "m/s"})`;
+  const el = $("arrowkey"), L = state.layers;
+  if (!L?.wind) { el.innerHTML = ""; return; }
+  const st = arrowStyle(), sw = c => `<b style="background:${c}"></b>`;
+  const parts = [
+    state.shown.a || state.shown.diff ? `${sw(st.A)} ${NAME.a}` : null,
+    L.b && (state.shown.b || state.shown.diff) ? `${sw(st.B)} ${NAME.b}` : null,
+  ].filter(Boolean).join(" · ");
+  const both = state.shown.diff ? " (en la diferencia se muestran ambas)" : "";
+  el.innerHTML = `Flechas: ${parts}${both} — hacia donde sopla; longitud ∝ velocidad (máx. ${Math.round(ARROWS.vref * (state.cfg.viewFactor ?? 1))} ${state.cfg.viewUnit ?? "m/s"})`;
 }
 
-function drawStats(cfg, layers) {
+function diffTiles(cfg, layers) {
   const diff = layers.diff;
   let n = 0, sum = 0, sq = 0, ab = 0, mx = -Infinity, mn = Infinity, gt = 0;
   for (const d of diff) {
@@ -435,56 +450,77 @@ function drawStats(cfg, layers) {
     if (d > mx) mx = d; if (d < mn) mn = d; if (Math.abs(d) > cfg.thresh) gt++;
   }
   const dec = cfg.decimals + 1, u = ` ${cfg.unit}`;
-  const sg = v => (v > 0 ? "+" : "") + v.toFixed(dec);
-  let tiles;
+  const sg = v => signed(v, dec);
   if (layers.kind === "vector") {
-    const mean = arr => { let s = 0; for (const v of arr) s += v; return s / arr.length; };
-    const vu = ` ${cfg.viewUnit ?? cfg.unit}`;
-    tiles = [
+    return [
       ["Módulo medio de la diferencia", (sum / n).toFixed(dec) + u],
       ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
       ["Máximo", mx.toFixed(dec) + u],
       [`Celdas con diferencia > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
-      [`Velocidad media · ${NAME.a.toLowerCase()}`, mean(layers.a).toFixed(dec) + vu],
-      [`Velocidad media · ${NAME.b.toLowerCase()}`, mean(layers.b).toFixed(dec) + vu],
     ];
-  } else {
-    tiles = [
-      ["Diferencia media", sg(sum / n) + u],
-      ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
-      ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
-      [`Última ${cfg.pos} (máx.)`, sg(mx) + u],
-      [`Última ${cfg.neg} (máx.)`, sg(mn) + u],
-      [`Celdas con |Δ| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
-    ];
-    if (layers.kind === "wdiff") {
-      // los extremos de una diferencia circular (±180°) no informan: se sustituyen por la cobertura de la máscara
-      tiles.splice(3, 2);
-      tiles.push([`Celdas con viento ≥ ${Math.round(cfg.minSpeed * cfg.viewFactor)} ${cfg.viewUnit} en ambas salidas`, `${(100 * n / diff.length).toFixed(1)} %`]);
-    }
   }
+  const tiles = [
+    ["Diferencia media", sg(sum / n) + u],
+    ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
+    ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
+    [`Última ${cfg.pos} (máx.)`, sg(mx) + u],
+    [`Última ${cfg.neg} (máx.)`, sg(mn) + u],
+    [`Celdas con |Δ| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
+  ];
+  if (layers.kind === "wdiff") {
+    // los extremos de una diferencia circular (±180°) no informan: se sustituyen por la cobertura de la máscara
+    tiles.splice(3, 2);
+    tiles.push([`Celdas con viento ≥ ${Math.round(cfg.minSpeed * cfg.viewFactor)} ${cfg.viewUnit} en ambas salidas`, `${(100 * n / diff.length).toFixed(1)} %`]);
+  }
+  return tiles;
+}
+
+// Mínimo, media y máximo de los datos de cada mapa en bruto que se muestra.
+function rawTiles(cfg, layers, arr, name) {
+  let n = 0, sum = 0, mn = Infinity, mx = -Infinity;
+  for (const v of arr) { if (!Number.isFinite(v)) continue; n++; sum += v; if (v < mn) mn = v; if (v > mx) mx = v; }
+  const vd = cfg.viewDecimals ?? cfg.decimals, vu = ` ${cfg.viewUnit ?? cfg.unit}`, w = layers.wind ? " · velocidad" : "";
+  return [[`${name}${w} · mínimo`, mn.toFixed(vd) + vu], [`${name}${w} · media`, (sum / n).toFixed(vd) + vu], [`${name}${w} · máximo`, mx.toFixed(vd) + vu]];
+}
+
+function drawStats(cfg, layers) {
+  const tiles = [];
+  if (state.shown.a) tiles.push(...rawTiles(cfg, layers, layers.a, NAME.a));
+  if (state.shown.b && layers.b) tiles.push(...rawTiles(cfg, layers, layers.b, NAME.b));
+  if (state.shown.diff && layers.diff) tiles.push(...diffTiles(cfg, layers));
   $("stats").innerHTML = tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
 }
 
 // ---------- Tooltip ----------
 const tip = $("tip");
-function onMove(e, canvas) {
+function onMove(e, canvas, kind) {
   const { cfg, layers } = state;
-  if (!layers) return;
+  if (!layers || (kind !== "a" && !layers.b)) return;
   const g = layers.grid, crop = getCrop(g), r = canvas.getBoundingClientRect();
   const px = crop.sx + (e.clientX - r.left) / r.width * crop.sw, py = crop.sy + (e.clientY - r.top) / r.height * crop.sh;
   const i = Math.floor(px), j = g.ny - 1 - Math.floor(py);
   if (i < 0 || j < 0 || i >= g.nx || j >= g.ny) { tip.style.display = "none"; return; }
   const k = j * g.nx + i;
-  const d = layers.diff[k], dec = cfg.decimals, sgn = d > 0 ? "+" : "";
-  const dtxt = Number.isFinite(d) ? `${sgn}${d.toFixed(dec)} ${cfg.unit}` : "sin dato (viento flojo)";
-  if (layers.kind === "scalar") {
-    tip.innerHTML = `Δ <b>${dtxt}</b><br>Última <b>${layers.a[k].toFixed(dec)}</b> · Anterior <b>${layers.b[k].toFixed(dec)}</b> ${cfg.unit}`;
+  const dec = cfg.decimals, vd = cfg.viewDecimals ?? cfg.decimals, vu = cfg.viewUnit ?? cfg.unit;
+  const muted = t => `<span style="color:var(--muted)">${t}</span>`;
+  let html;
+  if (kind !== "diff") {
+    // Mapa en bruto: valor absoluto de esa salida (en el viento, velocidad y dirección).
+    const arr = kind === "a" ? layers.a : layers.b, dirs = kind === "a" ? layers.dirA : layers.dirB;
+    html = layers.kind === "scalar"
+      ? `${muted(NAME[kind])}<br><b>${arr[k].toFixed(dec)}</b> ${cfg.unit}`
+      : `${muted(`${NAME[kind]} · velocidad y dirección`)}<br><b>${arr[k].toFixed(vd)}</b> ${vu} · <b>${Math.round(dirs[k])}°</b>`;
   } else {
-    const vd = cfg.viewDecimals ?? cfg.decimals, vu = cfg.viewUnit ?? cfg.unit;
-    const line = (n, s, dir) => `${n} <b>${s.toFixed(vd)}</b> ${vu} · <b>${Math.round(dir)}°</b>`;
-    tip.innerHTML = `${layers.kind === "vector" ? "|Δ vector|" : "Δ dirección"} <b>${dtxt}</b><br>${line("Última", layers.a[k], layers.dirA[k])}<br>${line("Anterior", layers.b[k], layers.dirB[k])}`;
+    const d = layers.diff[k];
+    const dtxt = Number.isFinite(d) ? `${signed(d, dec)} ${cfg.unit}` : "sin dato (viento flojo)";
+    if (layers.kind === "scalar") {
+      html = `Δ <b>${dtxt}</b><br>Última <b>${layers.a[k].toFixed(dec)}</b> · Anterior <b>${layers.b[k].toFixed(dec)}</b> ${cfg.unit}`;
+    } else {
+      const line = (n, sp, dir) => `${n} <b>${sp.toFixed(vd)}</b> ${vu} · <b>${Math.round(dir)}°</b>`;
+      html = `${layers.kind === "vector" ? "|Δ vector|" : "Δ dirección"} <b>${dtxt}</b><br>${line("Última", layers.a[k], layers.dirA[k])}<br>${line("Anterior", layers.b[k], layers.dirB[k])}`;
+    }
   }
+  tip.innerHTML = html;
   tip.style.display = "block";
   tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
   tip.style.top = e.clientY + 14 + "px";
@@ -503,6 +539,7 @@ function init() {
   $("region").innerHTML = REGION_GROUPS.map(g =>
     `<optgroup label="${g.label}">${g.regions.map(r => `<option value="${r.id}">${r.label}</option>`).join("")}</optgroup>`).join("");
   $("region").value = DEFAULT_REGION;
+  syncControls();
   refreshLeads(24);
   buildPanels();
 
@@ -527,7 +564,8 @@ function init() {
     if (state.shown[k] && Object.values(state.shown).filter(Boolean).length === 1) return; // al menos un mapa
     state.shown[k] = !state.shown[k];
     b.setAttribute("aria-pressed", state.shown[k]);
-    buildPanels(); drawAll();
+    syncControls(); refreshLeads(currentLead()); // sin salida anterior no hace falta que exista a +12 h, +24 h…
+    buildPanels(); update(); // descarga la salida anterior solo si ahora hace falta
   });
 
   let raf;

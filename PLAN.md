@@ -136,3 +136,11 @@ Biblioteca en `docs/palettes.js` (generada por `scripts/build-palettes.py`: secu
 | Precipitación | Radar | Marrón–verdeazulado |
 
 Para cambiar una paleta basta editar `palette` de esa variable; para añadir una, `build-palettes.py`. En la leyenda con `center` se indica el valor central y la barra respeta su posición real.
+
+## De "medidor de diferencias" a "visor de datos" (8 oct)
+
+- **Título y arranque:** "Visor de datos UKV"; por defecto se muestra solo la **Última salida** (datos en bruto). *Salida anterior* y *Diferencia* son opcionales.
+- **Tooltip por panel:** en los mapas en bruto muestra el valor absoluto de esa salida (en el viento, velocidad y dirección); en el de diferencia, Δ más los valores de ambas salidas. Un valor que se redondea a cero no lleva signo (sin "−0.0").
+- **La salida anterior solo se descarga si hace falta** (cuando se muestra ella o la diferencia). Sin ella, el desplegable "Comparar con" queda deshabilitado y el alcance llega a +120 h (con comparación, hasta +108 h por el desfase).
+- **Estadísticas:** mínimo, media y máximo de cada mapa en bruto mostrado (en el viento, de la velocidad) y, si se muestra la diferencia, sus estadísticos de siempre.
+- **Flechas** de cada salida solo cuando su panel (o la diferencia) está visible; la clave lo refleja.
