@@ -65,3 +65,24 @@ PLAN.md
 
 ## Siguiente paso
 Ejecutar la Fase 0 y, con los resultados, construir la Fase 1 en esta rama (`claude/modest-gauss-rvtfq7`).
+
+## Cambio de fuente: Met Office UKV 2 km en AWS Open Data (8 oct)
+
+TWO bloquea a Actions (ver arriba), así que la fuente pasa a ser el bucket abierto `met-office-atmospheric-model-data` (eu-west-2), prefijo `uk-deterministic-2km/`.
+
+**Verificado**
+- Acceso anónimo desde este entorno y desde navegador: **CORS abierto** (`Access-Control-Allow-Origin: *`, también en el listado). Una app solo JS puede leerlo sin backend ni Actions.
+- Un ciclo por hora (`YYYYMMDDTHH00Z/`), 17.557 ciclos (2 años de histórico, desde 2024-10-05). Los ciclos **03Z y 15Z llevan 120 h** (~5.000 ficheros, ~27 GB); los demás solo 12 h.
+- Fichero: `{validez}-PT{alcance}H00M-{variable}.nc`, NetCDF4/HDF5, ~1,5 MB, malla 970x1042, 2 km, proyección Lambert azimutal de áreas iguales (origen 54,9N -2,5E), valores float32 en **kelvin**.
+- Variables: `temperature_at_screen_level` (`air_temperature`), `temperature_at_screen_level_max-PT01H`, `..._min-PT01H`, `temperature_of_dew_point_at_screen_level` (`dew_point_temperature`).
+- Los ciclos completos terminan de subirse ~4 h 15 min después de la hora del ciclo (03Z -> ~07:15Z, 15Z -> ~19:15Z).
+- h5wasm (Node) lee estos ficheros correctamente.
+
+**Por verificar**
+- Que h5wasm funciona en el navegador con ficheros descargados por `fetch`.
+- Un fichero `..._max-PT01H` dio 404 con el nombre construido a mano (alcance 36); comprobar el patrón exacto de nombres de max/min.
+- Que la malla/proceso coincide con lo que dibuja TWO.
+
+**Diseño propuesto (todo JS, sin backend)**
+- Navegador: lista ciclos por S3, elige pasada A y B y alcance, descarga 2 ficheros (~3 MB), lee con h5wasm, resta B-A y pinta en `<canvas>` (diferencia, A y B) con lectura de valor al pasar el ratón y punto de interés por lat/lon (proyección LAEA a mano).
+- Opcional: Actions solo para pre-calcular resúmenes (diferencia media/máx por región) si se quiere un panel histórico rápido.

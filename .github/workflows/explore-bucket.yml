@@ -1,0 +1,21 @@
+name: Explore Met Office bucket
+
+# Prueba mínima: lista el bucket abierto UKV 2 km y lee un fichero con h5wasm.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/explore-bucket.yml
+      - scripts/explore-bucket.mjs
+      - package.json
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: node scripts/explore-bucket.mjs

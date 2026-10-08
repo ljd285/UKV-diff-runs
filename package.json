@@ -1,0 +1,8 @@
+{
+  "name": "ukv-diff-runs",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "h5wasm": "0.8.8"
+  }
+}
