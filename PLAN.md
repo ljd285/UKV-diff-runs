@@ -93,3 +93,13 @@ TWO bloquea a Actions (ver arriba), así que la fuente pasa a ser el bucket abie
 - `docs/laea.js`: proyección LAEA elipsoidal; coincide con pyproj al metro.
 - El visor de imágenes de TWO queda en `docs/images.html`.
 - Probado en Chromium con datos reales (claro y oscuro). Durante las pruebas el proxy del sandbox devolvió 404 intermitentes a ficheros que existen; el visor reintenta una vez.
+
+## Variables del visor (8 oct)
+
+Catálogo en `docs/variables.js`: temperatura 1,5 m, Tmáx/Tmín (última hora), rocío, presión a nivel del mar, viento y racha a 10 m, humedad relativa, nubosidad total y tasa de precipitación. Cada entrada define fichero, unidad y conversión, decimales, escalas ±, umbral, textos del signo y rango secuencial.
+
+**Añadir una variable:** 1) localizar el fichero con `node scripts/explore-bucket.mjs` (o el listado S3); 2) abrir un fichero y anotar unidades y rango; 3) añadir una entrada en `VARIABLES` (y un grupo en `GROUPS` si hace falta). No hay que tocar `app.js`.
+
+**Alcances:** la mayoría de variables solo existen cada hora hasta +54 h y cada 3 h de +57 a +120 h (`leads: "std"`); T 1,5 m, Tmáx y Tmín existen cada hora (Tmáx/Tmín desde +1 h). El deslizador solo ofrece alcances para los que existen A y B (corrige que el rocío daba 404 en +55, +56, +58...).
+
+**Pendiente (no incluido):** variables de nivel (presión/altura, 17-65 MB por fichero), dirección de viento (requiere diferencia circular o componentes u/v), acumulados (`-PT01H` hasta +54 h y `-PT03H` desde +57 h: el sufijo cambia con el alcance).

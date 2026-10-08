@@ -56,12 +56,7 @@
   <div class="panel">
     <div class="row">
       <label>Variable
-        <select id="variable">
-          <option value="t">Temperatura a 1,5 m</option>
-          <option value="tmax">Temperatura máxima (última hora)</option>
-          <option value="tmin">Temperatura mínima (última hora)</option>
-          <option value="td">Punto de rocío</option>
-        </select>
+        <select id="variable"></select>
       </label>
       <label>Pasada A (más reciente)
         <span style="display:flex;gap:6px">
@@ -84,16 +79,16 @@
           <button data-v="b" aria-pressed="false">Pasada B</button>
         </span>
       </label>
-      <label id="scaleWrap">Escala ± (°C)
-        <select id="scale"><option>1</option><option>2</option><option selected>3</option><option>5</option><option>8</option></select>
+      <label id="scaleWrap">Escala ±
+        <select id="scale"></select>
       </label>
     </div>
     <div class="row">
       <label>Alcance de la pasada A: <b id="leadLabel"></b>
-        <input type="range" id="lead" min="0" max="108" value="24">
+        <input type="range" id="lead" min="0" max="0" value="0">
       </label>
-      <button id="prev" aria-label="Alcance −1 h">−1 h</button>
-      <button id="next" aria-label="Alcance +1 h">+1 h</button>
+      <button id="prev" aria-label="Alcance anterior">◀</button>
+      <button id="next" aria-label="Alcance siguiente">▶</button>
     </div>
     <div class="info" id="info"></div>
     <div class="info" id="status">Cargando…</div>

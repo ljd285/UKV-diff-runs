@@ -1,13 +1,8 @@
 import h5wasm from "./vendor/h5wasm/hdf5_hl.js";
 import { makeLaea } from "./laea.js";
+import { GROUPS, VARIABLES, DEFAULT_VARIABLE, validLeads } from "./variables.js";
 
 const BASE = "https://met-office-atmospheric-model-data.s3-eu-west-2.amazonaws.com/uk-deterministic-2km";
-const FILES = {
-  t: "temperature_at_screen_level",
-  tmax: "temperature_at_screen_level_max-PT01H",
-  tmin: "temperature_at_screen_level_min-PT01H",
-  td: "temperature_of_dew_point_at_screen_level",
-};
 const AVAILABLE_AFTER_H = 4.5; // el ciclo completo se termina de subir ~4 h 15 min después de su hora
 const HOUR = 3600e3;
 
@@ -57,7 +52,7 @@ function cycleName(t) {
   return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}00Z`;
 }
 function urlFor(cycleT, lead, key) {
-  return `${BASE}/${cycleName(cycleT)}/${cycleName(cycleT + lead * HOUR)}-PT${pad(lead, 4)}H00M-${FILES[key]}.nc`;
+  return `${BASE}/${cycleName(cycleT)}/${cycleName(cycleT + lead * HOUR)}-PT${pad(lead, 4)}H00M-${VARIABLES[key].file}.nc`;
 }
 
 async function loadField(cycleT, lead, key) {
@@ -108,11 +103,27 @@ function defaultCycle() {
   }
 }
 
+let leads = []; // alcances válidos de la pasada A para la variable y el desfase elegidos
+
+function refreshLeads(wanted) {
+  leads = validLeads(VARIABLES[$("variable").value], Number($("offset").value));
+  $("lead").max = Math.max(0, leads.length - 1);
+  let best = 0; // conserva el alcance pedido o el más cercano que exista
+  leads.forEach((h, i) => { if (Math.abs(h - wanted) < Math.abs(leads[best] - wanted)) best = i; });
+  $("lead").value = best;
+}
+const currentLead = () => leads[Number($("lead").value)];
+
+function fillScales(cfg) {
+  $("scale").innerHTML = cfg.scales.map(v => `<option${v === cfg.scale ? " selected" : ""}>${v}</option>`).join("");
+  $("scaleWrap").firstChild.textContent = `Escala ± (${cfg.unit})`;
+}
+
 function readControls() {
   const [y, m, d] = $("date").value.split("-").map(Number);
   const tA = Date.UTC(y, m - 1, d) + Number($("run").value) * HOUR;
-  const lead = Number($("lead").value), off = Number($("offset").value);
-  return { key: $("variable").value, tA, lead, tB: tA - off * HOUR, leadB: lead + off, off };
+  const lead = currentLead(), off = Number($("offset").value), key = $("variable").value;
+  return { key, cfg: VARIABLES[key], tA, lead, tB: tA - off * HOUR, leadB: lead + off, off };
 }
 const fmt = t => { const d = new Date(t); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}Z`; };
 
@@ -120,15 +131,15 @@ function setStatus(msg, err = false) { const s = $("status"); s.textContent = ms
 
 async function update() {
   const c = readControls();
+  const token = ++state.token;
+  if (c.lead === undefined) { setStatus("Esta variable no tiene alcances comunes para ese desfase.", true); return; }
   $("leadLabel").textContent = `+${c.lead} h`;
   $("info").innerHTML = `Validez <b>${fmt(c.tA + c.lead * HOUR)}</b> · A: <b>${fmt(c.tA)} +${c.lead} h</b> · B: <b>${fmt(c.tB)} +${c.leadB} h</b>`;
-  const token = ++state.token;
-  if (c.leadB > 120) { setStatus("El alcance de la pasada B superaría 120 h; reduce el alcance.", true); return; }
   setStatus("Descargando…");
   try {
     const [A, B] = await Promise.all([loadField(c.tA, c.lead, c.key), loadField(c.tB, c.leadB, c.key)]);
     if (token !== state.token) return;
-    state.A = A; state.B = B;
+    state.A = A; state.B = B; state.cfg = c.cfg;
     setStatus("");
     render();
   } catch (e) {
@@ -152,16 +163,27 @@ let coast = null;
 async function getCoast() { return coast ??= await (await fetch("coast.json")).json(); }
 const laea = makeLaea();
 
+// Rango de la vista secuencial (A y B), en la unidad mostrada.
+function seqRange(cfg, both) {
+  const conv = v => v * cfg.factor + cfg.offset;
+  const q = cfg.seq ?? "auto";
+  let lo, hi;
+  if (q === "auto") { lo = conv(percentile(both, 0.02)); hi = conv(percentile(both, 0.98)); }
+  else { lo = q.lo; hi = q.hi === "p99" ? Math.max(conv(percentile(both, 0.995)), q.hiMin ?? 0) : q.hi; }
+  if (!(hi > lo)) hi = lo + 1;
+  return [lo, hi];
+}
+
 function render() {
-  const { A, B } = state;
+  const { A, B, cfg } = state;
   if (!A || !B) return;
   const { nx, ny } = A;
   for (const cv of [map, over]) { cv.width = nx; cv.height = ny; }
   const pal = palettes();
   const view = state.view;
   const n = nx * ny;
-  const diff = new Float32Array(n);
-  for (let i = 0; i < n; i++) diff[i] = A.data[i] - B.data[i];
+  const diff = new Float32Array(n); // en la unidad mostrada
+  for (let i = 0; i < n; i++) diff[i] = (A.data[i] - B.data[i]) * cfg.factor;
 
   let vals, lo, hi, table;
   if (view === "diff") {
@@ -171,8 +193,7 @@ function render() {
     // misma escala para A y B, para que sean comparables entre sí
     vals = (view === "a" ? A : B).data;
     const both = new Float32Array(2 * n); both.set(A.data); both.set(B.data, n);
-    lo = percentile(both, 0.02) - 273.15; hi = percentile(both, 0.98) - 273.15; table = pal.seq;
-    if (!(hi > lo)) hi = lo + 1;
+    [lo, hi] = seqRange(cfg, both); table = pal.seq;
   }
   const img = new ImageData(nx, ny);
   const px = img.data;
@@ -182,16 +203,16 @@ function render() {
       let v = vals[j * nx + i];
       const o = (r * nx + i) * 4;
       if (!Number.isFinite(v)) continue;
-      if (view !== "diff") v -= 273.15;
+      if (view !== "diff") v = v * cfg.factor + cfg.offset;
       const t = Math.min(255, Math.max(0, Math.round((v - lo) / (hi - lo) * 255))) * 4;
       px[o] = table[t]; px[o + 1] = table[t + 1]; px[o + 2] = table[t + 2]; px[o + 3] = 255;
     }
   }
   map.getContext("2d").putImageData(img, 0, 0);
-  state.geom = { A, B, diff };
+  state.geom = { A, B, diff, cfg };
   drawOverlay();
-  drawLegend(view, lo, hi, table);
-  drawStats(diff);
+  drawLegend(cfg, view, lo, hi, table);
+  drawStats(cfg, diff);
 }
 
 async function drawOverlay() {
@@ -218,38 +239,39 @@ async function drawOverlay() {
   }
 }
 
-function drawLegend(view, lo, hi, table) {
+function drawLegend(cfg, view, lo, hi, table) {
   const lg = $("legend");
   lg.innerHTML = "";
-  const unit = "°C";
+  const unit = cfg.unit;
   const left = document.createElement("span"), right = document.createElement("span");
   const bar = document.createElement("canvas"); bar.width = 256; bar.height = 1;
   const id = new ImageData(256, 1);
   id.data.set(table.subarray(0, 1024));
   bar.getContext("2d").putImageData(id, 0, 0);
   if (view === "diff") {
-    left.textContent = `${lo} ${unit} · A más fría`; right.textContent = `A más cálida · +${hi} ${unit}`;
+    left.textContent = `${lo} ${unit} · A ${cfg.neg}`; right.textContent = `A ${cfg.pos} · +${hi} ${unit}`;
   } else {
-    left.textContent = `${lo.toFixed(1)} ${unit}`; right.textContent = `${hi.toFixed(1)} ${unit}`;
+    left.textContent = `${lo.toFixed(cfg.decimals)} ${unit}`; right.textContent = `${hi.toFixed(cfg.decimals)} ${unit}`;
   }
   lg.append(left, bar, right);
 }
 
-function drawStats(diff) {
-  let n = 0, sum = 0, sq = 0, ab = 0, mx = -Infinity, mn = Infinity, g1 = 0;
+function drawStats(cfg, diff) {
+  let n = 0, sum = 0, sq = 0, ab = 0, mx = -Infinity, mn = Infinity, gt = 0;
   for (const d of diff) {
     if (!Number.isFinite(d)) continue;
     n++; sum += d; sq += d * d; ab += Math.abs(d);
-    if (d > mx) mx = d; if (d < mn) mn = d; if (Math.abs(d) > 1) g1++;
+    if (d > mx) mx = d; if (d < mn) mn = d; if (Math.abs(d) > cfg.thresh) gt++;
   }
-  const sg = v => (v > 0 ? "+" : "") + v.toFixed(2);
+  const dec = cfg.decimals + 1, u = ` ${cfg.unit}`;
+  const sg = v => (v > 0 ? "+" : "") + v.toFixed(dec);
   const tiles = [
-    ["Diferencia media", `${sg(sum / n)} °C`],
-    ["Diferencia absoluta media", `${(ab / n).toFixed(2)} °C`],
-    ["Error cuadrático medio", `${Math.sqrt(sq / n).toFixed(2)} °C`],
-    ["Máx. A más cálida", `${sg(mx)} °C`],
-    ["Máx. A más fría", `${sg(mn)} °C`],
-    ["Celdas con |Δ| > 1 °C", `${(100 * g1 / n).toFixed(1)} %`],
+    ["Diferencia media", sg(sum / n) + u],
+    ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
+    ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
+    [`Máx. A ${cfg.pos}`, sg(mx) + u],
+    [`Máx. A ${cfg.neg}`, sg(mn) + u],
+    [`Celdas con |Δ| > ${cfg.thresh}${u}`, `${(100 * gt / n).toFixed(1)} %`],
   ];
   $("stats").innerHTML = tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
 }
@@ -264,8 +286,9 @@ over.addEventListener("pointermove", e => {
   const j = g.A.ny - 1 - row;
   if (i < 0 || j < 0 || i >= g.A.nx || j >= g.A.ny) { tip.style.display = "none"; return; }
   const k = j * g.A.nx + i;
-  const a = g.A.data[k] - 273.15, b = g.B.data[k] - 273.15, d = g.diff[k];
-  tip.innerHTML = `Δ <b>${d > 0 ? "+" : ""}${d.toFixed(1)} °C</b><br>A <b>${a.toFixed(1)}</b> · B <b>${b.toFixed(1)}</b> °C`;
+  const c = g.cfg, dec = c.decimals;
+  const a = g.A.data[k] * c.factor + c.offset, b = g.B.data[k] * c.factor + c.offset, d = g.diff[k];
+  tip.innerHTML = `Δ <b>${d > 0 ? "+" : ""}${d.toFixed(dec)} ${c.unit}</b><br>A <b>${a.toFixed(dec)}</b> · B <b>${b.toFixed(dec)}</b> ${c.unit}`;
   tip.style.display = "block";
   tip.style.left = Math.min(e.clientX + 14, innerWidth - 150) + "px";
   tip.style.top = e.clientY + 14 + "px";
@@ -277,9 +300,22 @@ function init() {
   const t = defaultCycle(), d = new Date(t);
   $("date").value = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
   $("run").value = pad(d.getUTCHours());
-  for (const id of ["variable", "date", "run", "offset", "lead"]) $(id).addEventListener("input", update);
+
+  $("variable").innerHTML = GROUPS.map(g =>
+    `<optgroup label="${g.label}">${Object.entries(VARIABLES).filter(([, v]) => v.group === g.id)
+      .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("")}</optgroup>`).join("");
+  $("variable").value = DEFAULT_VARIABLE;
+  fillScales(VARIABLES[DEFAULT_VARIABLE]);
+  refreshLeads(24);
+
+  $("variable").addEventListener("input", () => {
+    const keep = currentLead();
+    fillScales(VARIABLES[$("variable").value]); refreshLeads(keep); update();
+  });
+  $("offset").addEventListener("input", () => { refreshLeads(currentLead()); update(); });
+  for (const id of ["date", "run", "lead"]) $(id).addEventListener("input", update);
   $("scale").addEventListener("input", render);
-  const nudge = k => { $("lead").value = Math.min(108, Math.max(0, Number($("lead").value) + k)); update(); };
+  const nudge = k => { $("lead").value = Math.min(leads.length - 1, Math.max(0, Number($("lead").value) + k)); update(); };
   $("prev").onclick = () => nudge(-1);
   $("next").onclick = () => nudge(1);
   $("view").addEventListener("click", e => {
