@@ -123,18 +123,20 @@ function compute(cfg, SA, SB) {
     return { kind, grid, a, b, diff };
   }
 
-  // Viento: dirección = de dónde sopla (grados, sentido horario desde el norte).
+  // Viento: dirección = de dónde sopla (grados, sentido horario desde el norte). Velocidades crudas en m/s.
   const sA = SA.speed.data, sB = SB.speed.data, dA = SA.dir.data, dB = SB.dir.data;
+  const vf = cfg.viewFactor ?? 1, a = new Float32Array(n), b = new Float32Array(n);
   for (let i = 0; i < n; i++) {
+    a[i] = sA[i] * vf; b[i] = sB[i] * vf;
     if (kind === "wdiff") {
       diff[i] = Math.min(sA[i], sB[i]) < cfg.minSpeed ? NaN : ((dA[i] - dB[i] + 540) % 360) - 180; // circular, (−180, 180]
     } else {
       const uA = -sA[i] * Math.sin(dA[i] * RAD), vA = -sA[i] * Math.cos(dA[i] * RAD);
       const uB = -sB[i] * Math.sin(dB[i] * RAD), vB = -sB[i] * Math.cos(dB[i] * RAD);
-      diff[i] = Math.hypot(uA - uB, vA - vB); // invariante frente al giro de ejes
+      diff[i] = Math.hypot(uA - uB, vA - vB) * cfg.factor; // invariante frente al giro de ejes
     }
   }
-  return { kind, grid, a: sA, b: sB, diff, dirA: dA, dirB: dB, wind: true };
+  return { kind, grid, a, b, diff, dirA: dA, dirB: dB, rawA: sA, rawB: sB, wind: true };
 }
 
 // Media por bloques de `step` celdas del viento (componentes este/norte verdaderas), girada a ejes de la malla
@@ -361,7 +363,7 @@ function drawArrows(ctx, which, color, width, crop, f, dpr, cssW) {
   const step = Math.min(120, Math.max(2, Math.round(ARROWS.spacing / (cssW / crop.sw))));
   const key = `${which}:${step}`;
   if (!state.arrowCache.has(key)) {
-    state.arrowCache.set(key, arrowField(g, which === "A" ? L.a : L.b, which === "A" ? L.dirA : L.dirB, step));
+    state.arrowCache.set(key, arrowField(g, which === "A" ? L.rawA : L.rawB, which === "A" ? L.dirA : L.dirB, step));
   }
   const maxLen = ARROWS.spacing * 0.95 * dpr, minLen = ARROWS.minLen * dpr;
   const path = new Path2D();
@@ -408,7 +410,7 @@ function drawArrowKey() {
   if (!state.layers?.wind) { el.innerHTML = ""; return; }
   const st = arrowStyle();
   const sw = c => `<b style="background:${c}"></b>`;
-  el.innerHTML = `Flechas: ${sw(st.A)} ${NAME.a} · ${sw(st.B)} ${NAME.b} (en la diferencia se muestran ambas) — hacia donde sopla; longitud ∝ velocidad (máx. ${ARROWS.vref} m/s)`;
+  el.innerHTML = `Flechas: ${sw(st.A)} ${NAME.a} · ${sw(st.B)} ${NAME.b} (en la diferencia se muestran ambas) — hacia donde sopla; longitud ∝ velocidad (máx. ${Math.round(ARROWS.vref * (state.cfg.viewFactor ?? 1))} ${state.cfg.viewUnit ?? "m/s"})`;
 }
 
 function drawStats(cfg, layers) {
@@ -445,7 +447,7 @@ function drawStats(cfg, layers) {
     if (layers.kind === "wdiff") {
       // los extremos de una diferencia circular (±180°) no informan: se sustituyen por la cobertura de la máscara
       tiles.splice(3, 2);
-      tiles.push(["Celdas con viento ≥ " + cfg.minSpeed + " m/s en ambas salidas", `${(100 * n / diff.length).toFixed(1)} %`]);
+      tiles.push([`Celdas con viento ≥ ${Math.round(cfg.minSpeed * cfg.viewFactor)} ${cfg.viewUnit} en ambas salidas`, `${(100 * n / diff.length).toFixed(1)} %`]);
     }
   }
   $("stats").innerHTML = tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
