@@ -118,3 +118,21 @@ Catálogo en `docs/variables.js`: temperatura 1,5 m, Tmáx/Tmín (última hora),
 - **Escala fija por variable** (`diffScale` y `range` en `docs/variables.js`), elegida variable a variable: T 1,5 m ±3 °C / −10…30; Tmáx ±3 / −5…35; Tmín ±3 / −10…20; rocío ±3 / −10…20 °C; presión ±2 / 980…1040 hPa; viento ±7 / 0…55 mph; racha ±10 / 0…80 mph; dirección ±30° (fondo 0…55 mph); vectores 0…7 mph (fondo 0…55 mph); humedad ±5 / 20…100 %; nubosidad ±25 / 0…100 %; precipitación ±0,5 / 0…4 mm/h.
 - **Viento en mph** (factor 2,23694 desde m/s; las flechas siguen midiéndose internamente en m/s).
 - **Sin texto "Descargando…":** durante la carga el mapa se atenúa y la altura de la página no cambia (la línea de validez y la de errores tienen hueco reservado). El deslizador espera 150 ms antes de descargar.
+
+## Paletas de color por variable (8 oct)
+
+Biblioteca en `docs/palettes.js` (generada por `scripts/build-palettes.py`: secuenciales, divergentes, versiones clara y oscura) y elección por variable en `docs/variables.js` (`palette: {map, diff}`, y `center` para una paleta de mapa divergente). Elegidas con muestras sobre datos reales:
+
+| Variable | Mapa de cada salida | Diferencia |
+|---|---|---|
+| T 1,5 m, Tmáx, Tmín | Clásica meteorológica | Azul–rojo |
+| Punto de rocío | Clásica meteorológica | Naranja–verde |
+| Presión | Azul–rojo centrada en 1004 hPa (rango 980…1040) | Azul–rojo |
+| Velocidad y racha del viento | Plasma | Púrpura–verde |
+| Dirección del viento | Plasma (velocidad de fondo) | Marrón–verdeazulado |
+| Viento (vectores) | Viridis (velocidad de fondo) | Módulo en amarillo–naranja–rojo |
+| Humedad relativa | Amarillo–verde–azul | Marrón–verdeazulado |
+| Nubosidad total | Viridis | Marrón–verdeazulado |
+| Precipitación | Radar | Marrón–verdeazulado |
+
+Para cambiar una paleta basta editar `palette` de esa variable; para añadir una, `build-palettes.py`. En la leyenda con `center` se indica el valor central y la barra respeta su posición real.

@@ -2,6 +2,7 @@ import h5wasm from "./vendor/h5wasm/hdf5_hl.js";
 import { makeLaea, makeConvergence } from "./laea.js";
 import { GROUPS, VARIABLES, DEFAULT_VARIABLE, validLeads, ARROWS, WIND_DIR_REFERENCE } from "./variables.js";
 import { REGION_GROUPS, REGIONS, DEFAULT_REGION } from "./regions.js";
+import { SEQUENTIAL, DIVERGING } from "./palettes.js";
 
 const BASE = "https://met-office-atmospheric-model-data.s3-eu-west-2.amazonaws.com/uk-deterministic-2km";
 const AVAILABLE_AFTER_H = 4.5; // el ciclo completo se termina de subir ~4 h 15 min después de su hora
@@ -33,16 +34,24 @@ function lut(stops) {
   }
   return out;
 }
-const palettes = () => dark()
-  ? {
-      // gris neutro en el centro; los extremos se aclaran sobre fondo oscuro
-      diff: lut(["#9ec5f4", "#2a78d6", "#383835", "#c0392b", "#ff9d8a"]),
-      seq: lut(["#0d366b", "#2a78d6", "#b7d3f6"]),
-    }
-  : {
-      diff: lut(["#184f95", "#6da7ec", "#f0efec", "#f08c7a", "#a8201a"]),
-      seq: lut(["#dbe9fb", "#2a78d6", "#0d366b"]),
-    };
+// Paleta por nombre (docs/palettes.js), en su versión clara u oscura según el tema.
+const lutCache = new Map();
+function paletteLUT(name) {
+  const key = name + (dark() ? ":d" : ":l");
+  if (!lutCache.has(key)) {
+    let stops;
+    if (SEQUENTIAL[name]) stops = dark() ? (SEQUENTIAL[name].dark ?? SEQUENTIAL[name].stops) : SEQUENTIAL[name].stops;
+    else if (DIVERGING[name]) stops = dark() ? DIVERGING[name].dark : DIVERGING[name].light;
+    else throw new Error(`Paleta desconocida: ${name}`);
+    lutCache.set(key, lut(stops));
+  }
+  return lutCache.get(key);
+}
+// Valor → posición en la paleta (0..1). Con `center`, el centro de la paleta cae en ese valor aunque no sea el punto medio.
+const normalize = (v, lo, hi, center) => center == null
+  ? (v - lo) / (hi - lo)
+  : v < center ? 0.5 * (v - lo) / (center - lo) : 0.5 + 0.5 * (v - center) / (hi - center);
+const lutIndex = (v, lo, hi, center) => Math.min(255, Math.max(0, Math.round(normalize(v, lo, hi, center) * 255))) * 4;
 // Flechas: color + halo para que se lean sobre cualquier fondo.
 const arrowStyle = () => dark()
   ? { A: "#f4f6f8", B: "#ffb454", halo: "rgba(0,0,0,0.75)" }
@@ -258,14 +267,14 @@ function buildPanels() {
 function getImage(kind) {
   if (state.images[kind]) return state.images[kind];
   const { cfg, layers } = state;
-  const { nx, ny } = layers.grid, pal = palettes();
-  let vals, lo, hi, table;
+  const { nx, ny } = layers.grid, pal = cfg.palette ?? { map: "azul", diff: "azul-rojo" };
+  let vals, lo, hi, table, center = null;
   if (kind === "diff") {
-    vals = layers.diff; table = layers.kind === "vector" ? pal.seq : pal.diff; // el módulo no tiene signo
+    vals = layers.diff; table = paletteLUT(pal.diff); // para "vector" el módulo no tiene signo: paleta secuencial
     [lo, hi] = layers.kind === "vector" ? [0, cfg.diffScale] : [-cfg.diffScale, cfg.diffScale];
   } else {
     vals = kind === "a" ? layers.a : layers.b;
-    [lo, hi] = cfg.range; table = pal.seq;
+    [lo, hi] = cfg.range; table = paletteLUT(pal.map); center = cfg.center ?? null;
   }
   const img = new ImageData(nx, ny), px = img.data;
   for (let r = 0; r < ny; r++) {
@@ -274,14 +283,14 @@ function getImage(kind) {
       const v = vals[j * nx + i];
       if (!Number.isFinite(v)) continue; // p. ej. viento flojo en la diferencia de dirección
       const o = (r * nx + i) * 4;
-      const t = Math.min(255, Math.max(0, Math.round((v - lo) / (hi - lo) * 255))) * 4;
+      const t = lutIndex(v, lo, hi, center);
       px[o] = table[t]; px[o + 1] = table[t + 1]; px[o + 2] = table[t + 2]; px[o + 3] = 255;
     }
   }
   const off = document.createElement("canvas");
   off.width = nx; off.height = ny;
   off.getContext("2d").putImageData(img, 0, 0);
-  return (state.images[kind] = { canvas: off, lo, hi, table });
+  return (state.images[kind] = { canvas: off, lo, hi, table, center });
 }
 
 const laea = makeLaea();
@@ -392,11 +401,15 @@ function drawLegend(p, cfg, layers, img) {
   const left = document.createElement("span"), right = document.createElement("span");
   const bar = document.createElement("canvas"); bar.width = 256; bar.height = 1;
   const id = new ImageData(256, 1);
-  id.data.set(img.table.subarray(0, 1024));
+  for (let i = 0; i < 256; i++) { // misma normalización que el mapa (el centro puede no estar a mitad de barra)
+    const t = lutIndex(img.lo + (img.hi - img.lo) * i / 255, img.lo, img.hi, img.center);
+    id.data.set(img.table.subarray(t, t + 4), i * 4);
+  }
   bar.getContext("2d").putImageData(id, 0, 0);
   const vu = cfg.viewUnit ?? cfg.unit;
   if (p.kind !== "diff") {
-    left.textContent = `${img.lo} ${vu}`; right.textContent = `${img.hi} ${vu}`;
+    left.textContent = `${img.lo} ${vu}`;
+    right.textContent = img.center == null ? `${img.hi} ${vu}` : `centro ${img.center} ${vu} · ${img.hi} ${vu}`;
   } else if (layers.kind === "vector") {
     left.textContent = `0 ${cfg.unit}`; right.textContent = `${img.hi} ${cfg.unit} · módulo de la diferencia`;
   } else {

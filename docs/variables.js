@@ -9,6 +9,10 @@
 //                     (las diferencias solo usan factor).
 //   decimals          Decimales al mostrar valores y estadísticas.
 //   diffScale         Escala FIJA de la diferencia: ±diffScale en `unit` (para kind "vector": de 0 a diffScale).
+//   palette           {map, diff}: nombres de paleta de docs/palettes.js para los mapas de cada salida y para la diferencia.
+//                     `diff` es divergente (negativo → gris → positivo); para kind "vector" es secuencial (módulo, desde 0).
+//   center            (opcional) valor en la unidad mostrada donde cae el centro de una paleta `map` divergente
+//                     (p. ej. presión centrada en 1004 hPa); el rango [min, max] no tiene por qué ser simétrico.
 //   range             Rango FIJO [min, max] de los mapas de cada salida, en la unidad mostrada (viewUnit para el viento).
 //   thresh            Umbral para la estadística "celdas con |Δ| > umbral" (en `unit`).
 //   pos, neg          Texto de "A es más ..." para diferencias positivas / negativas.
@@ -35,28 +39,29 @@ export const GROUPS = [
   { id: "precip", label: "Precipitación" },
 ];
 
-const KELVIN = { factor: 1, offset: -273.15, unit: "°C", decimals: 1, diffScale: 3, range: [-10, 30], thresh: 1, pos: "más cálida", neg: "más fría" };
+const KELVIN = { factor: 1, offset: -273.15, unit: "°C", decimals: 1, diffScale: 3, range: [-10, 30], thresh: 1, pos: "más cálida", neg: "más fría",
+  palette: { map: "clasica", diff: "azul-rojo" } };
 
 export const VARIABLES = {
   t:    { ...KELVIN, label: "Temperatura a 1,5 m", group: "temp", file: "temperature_at_screen_level", leads: "any" },
   tmax: { ...KELVIN, label: "Temperatura máxima (última hora)", group: "temp", file: "temperature_at_screen_level_max-PT01H", leads: "any", minLead: 1, range: [-5, 35] },
   tmin: { ...KELVIN, label: "Temperatura mínima (última hora)", group: "temp", file: "temperature_at_screen_level_min-PT01H", leads: "any", minLead: 1, range: [-10, 20] },
-  td:   { ...KELVIN, label: "Punto de rocío", group: "temp", file: "temperature_of_dew_point_at_screen_level", leads: "std", range: [-10, 20] },
+  td:   { ...KELVIN, label: "Punto de rocío", group: "temp", file: "temperature_of_dew_point_at_screen_level", leads: "std", range: [-10, 20], palette: { map: "clasica", diff: "naranja-verde" } },
 
   pmsl: {
     label: "Presión a nivel del mar", group: "pres", file: "pressure_at_mean_sea_level", leads: "std",
-    unit: "hPa", factor: 0.01, offset: 0, decimals: 1, diffScale: 2, range: [980, 1040], thresh: 1,
+    unit: "hPa", factor: 0.01, offset: 0, decimals: 1, diffScale: 2, range: [980, 1040], palette: { map: "azul-rojo", diff: "azul-rojo" }, center: 1004, thresh: 1,
     pos: "más alta", neg: "más baja",
   },
 
   wind: {
     label: "Velocidad del viento", group: "wind", file: "wind_speed_at_10m", leads: "std",
-    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 7, range: [0, 55], thresh: 5,
+    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 7, range: [0, 55], palette: { map: "plasma", diff: "prgn" }, thresh: 5,
     pos: "más fuerte", neg: "más débil",
   },
   gust: {
     label: "Racha de viento", group: "wind", file: "wind_gust_at_10m", leads: "std",
-    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 10, range: [0, 80], thresh: 10,
+    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 10, range: [0, 80], palette: { map: "plasma", diff: "prgn" }, thresh: 10,
     pos: "más fuerte", neg: "más débil",
   },
 
@@ -64,30 +69,30 @@ export const VARIABLES = {
     label: "Dirección del viento (diferencia)", group: "wind", kind: "wdiff", leads: "std",
     files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
     unit: "°", factor: 1, offset: 0, decimals: 0, viewUnit: "mph", viewFactor: 2.23694, viewDecimals: 1,
-    diffScale: 30, range: [0, 55], thresh: 30, minSpeed: 1.5, // minSpeed en m/s (valor del fichero)
+    diffScale: 30, range: [0, 55], palette: { map: "plasma", diff: "brbg" }, thresh: 30, minSpeed: 1.5, // minSpeed en m/s (valor del fichero)
     pos: "rolada en sentido horario", neg: "rolada en sentido antihorario",
   },
   wvec: {
     label: "Viento (vectores)", group: "wind", kind: "vector", leads: "std",
     files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
     unit: "mph", factor: 2.23694, offset: 0, decimals: 1, viewUnit: "mph", viewFactor: 2.23694, viewDecimals: 1,
-    diffScale: 7, range: [0, 55], thresh: 5, pos: "", neg: "",
+    diffScale: 7, range: [0, 55], palette: { map: "viridis", diff: "ylorrd" }, thresh: 5, pos: "", neg: "",
   },
 
   rh: {
     label: "Humedad relativa", group: "moist", file: "relative_humidity_at_screen_level", leads: "std",
-    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 5, range: [20, 100], thresh: 5,
+    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 5, range: [20, 100], palette: { map: "ylgnbu", diff: "brbg" }, thresh: 5,
     pos: "más húmeda", neg: "más seca",
   },
   cloud: {
     label: "Nubosidad total", group: "moist", file: "cloud_amount_of_total_cloud", leads: "std",
-    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 25, range: [0, 100], thresh: 25,
+    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 25, range: [0, 100], palette: { map: "viridis", diff: "brbg" }, thresh: 25,
     pos: "más nublada", neg: "más despejada",
   },
 
   precip: {
     label: "Tasa de precipitación (equiv. líquido)", group: "precip", file: "precipitation_rate", leads: "std",
-    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 4], thresh: 0.25,
+    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 4], palette: { map: "radar", diff: "brbg" }, thresh: 0.25,
     pos: "más lluvia", neg: "menos lluvia",
   },
 };
