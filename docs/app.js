@@ -63,7 +63,13 @@ const arrowStyle = () => dark()
 // ---------- Datos ----------
 await h5wasm.ready;
 const { FS } = await h5wasm.ready;
-const cache = new Map();
+// Caché de campos (Float32, ~4 MB cada uno). Con límite: sin él, recorrer alcances de un acumulado de 12 h llenaría la memoria.
+const cache = new Map(), CACHE_MAX = 60;
+const cacheGet = key => { const v = cache.get(key); if (v) { cache.delete(key); cache.set(key, v); } return v; }; // el más usado, al final
+function cacheSet(key, v) {
+  cache.delete(key); cache.set(key, v);
+  while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value); // se descarta el menos usado
+}
 let fileSeq = 0;
 
 function cycleName(t) {
@@ -75,7 +81,7 @@ const urlFor = (cycleT, lead, file) =>
 
 async function loadField(cycleT, lead, file) {
   const url = urlFor(cycleT, lead, file);
-  if (cache.has(url)) return cache.get(url);
+  if (cache.has(url)) return cacheGet(url);
   let res = await fetch(url);
   if (res.status === 404) { // un 404 puntual se reintenta una vez antes de darlo por no disponible
     await new Promise(r => setTimeout(r, 800));
@@ -101,7 +107,7 @@ async function loadField(cycleT, lead, file) {
       data: Float32Array.from(v.value), nx, ny,
       x0: xs[0], dx: xs[1] - xs[0], y0: ys[0], dy: ys[1] - ys[0],
     };
-    cache.set(url, field);
+    cacheSet(url, field);
     return field;
   } finally {
     f.close();
@@ -109,8 +115,27 @@ async function loadField(cycleT, lead, file) {
   }
 }
 
+// Acumulado de `accum.hours` horas que termina en `lead`: suma los ficheros que cubren (lead − N, lead].
+// Hasta +54 h cada fichero es la hora anterior; desde +57 h, las 3 h anteriores (solo existen en múltiplos de 3 desde +54 h).
+async function loadAccum(cycleT, lead, cfg) {
+  const { hours, hourly, block } = cfg.accum, key = `acc:${cycleName(cycleT)}:${lead}:${hours}`;
+  if (cache.has(key)) return { main: cacheGet(key) };
+  const parts = [];
+  for (let h = lead - hours + 1; h <= lead; h++) {
+    if (h <= 54) parts.push(loadField(cycleT, h, hourly));
+    else if ((h - 54) % 3 === 0) parts.push(loadField(cycleT, h, block));
+  }
+  const fields = await Promise.all(parts);
+  const sum = new Float32Array(fields[0].data.length);
+  for (const f of fields) for (let i = 0; i < sum.length; i++) sum[i] += f.data[i];
+  const out = { ...fields[0], data: sum };
+  cacheSet(key, out);
+  return { main: out };
+}
+
 // Una salida de una variable: {main} o, para el viento, {dir, speed}.
 async function loadSet(cycleT, lead, cfg) {
+  if (cfg.accum) return loadAccum(cycleT, lead, cfg);
   const files = cfg.files ?? { main: cfg.file };
   const entries = await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loadField(cycleT, lead, f)]));
   return Object.fromEntries(entries);
@@ -250,7 +275,9 @@ async function update() {
   $("leadLabel").textContent = c.cfg.static ? "no aplica" : `+${c.lead} h`;
   $("info").innerHTML = c.cfg.static
     ? "Relieve del modelo UKV 2 km · no varía con la salida ni con el alcance"
-    : `Validez <b>${fmt(c.tA + c.lead * HOUR)}</b>`;
+    : c.cfg.accum
+      ? `Acumulado de <b>${c.cfg.accum.hours} h</b> · de ${fmt(c.tA + (c.lead - c.cfg.accum.hours) * HOUR)} a <b>${fmt(c.tA + c.lead * HOUR)}</b> (validez)`
+      : `Validez <b>${fmt(c.tA + c.lead * HOUR)}</b>`;
   setStatus();
   $("maps").classList.add("loading");
   try {
@@ -316,13 +343,15 @@ function getImage(kind) {
     [lo, hi] = cfg.range; table = paletteLUT(pal.map); center = cfg.center ?? null;
   }
   const img = new ImageData(nx, ny), px = img.data;
-  const m = filterMatcher(), em = state.cellMask; // filtro: en la diferencia basta con que cumpla alguna de las dos salidas
+  const m = filterMatcher(), em = state.cellMask, mv = cfg.minValue ?? null; // filtro: en la diferencia basta con que cumpla alguna de las dos salidas
   for (let r = 0; r < ny; r++) {
     const j = ny - 1 - r; // la malla va de sur a norte
     for (let i = 0; i < nx; i++) {
       const k = j * nx + i, v = vals[k];
       if (!Number.isFinite(v)) continue; // p. ej. viento flojo en la diferencia de dirección
       if (em && !em[k]) continue;
+      // por debajo del mínimo no se pinta; en la diferencia, solo si lo está en las dos salidas
+      if (mv != null && (kind === "diff" ? layers.a[k] < mv && layers.b[k] < mv : v < mv)) continue;
       if (m && !(kind === "diff" ? m(layers.a[k]) || m(layers.b[k]) : m(v))) continue;
       const o = (r * nx + i) * 4;
       const t = lutIndex(v, lo, hi, center);
@@ -468,6 +497,7 @@ function drawArrows(ctx, which, color, width, crop, f, dpr, cssW) {
   const path = new Path2D(), m = filterMatcher(), vf = state.cfg.viewFactor ?? 1, em = state.cellMask;
   for (const a of state.arrowCache.get(key)) {
     if (m && !m(a.s * vf)) continue;
+    if (state.cfg.minValue != null && a.s * vf < state.cfg.minValue) continue;
     if (em && !em[Math.round(g.ny - a.py - 0.5) * g.nx + Math.round(a.px - 0.5)]) continue; // altitud de la celda de la flecha
     const x = (a.px - crop.sx) * f, y = (a.py - crop.sy) * f;
     if (x < -maxLen || y < -maxLen || x > crop.sw * f + maxLen || y > crop.sh * f + maxLen) continue;
@@ -507,7 +537,14 @@ function drawLegend(p, cfg, layers, img) {
   } else {
     left.textContent = `${img.lo} ${cfg.unit} · última ${cfg.neg}`; right.textContent = `última ${cfg.pos} · +${img.hi} ${cfg.unit}`;
   }
+  right.className = "r";
   lg.append(bar, left, right);
+  if (cfg.minValue != null) { // aviso de lo que no se pinta
+    const note = document.createElement("span");
+    note.className = "note";
+    note.textContent = `Sin pintar: valores < ${num(cfg.minValue)} ${vu}${p.kind === "diff" ? " (en la diferencia, solo donde ambas salidas están por debajo)" : ""}`;
+    lg.append(note);
+  }
 }
 
 function drawArrowKey() {
@@ -566,10 +603,14 @@ function diffTiles(cfg, layers, ok, filtered) {
 
 // Mínimo, media y máximo de los datos de cada mapa en bruto mostrado (solo de las celdas que cumplen los filtros).
 function rawTiles(cfg, layers, arr, name, okv, filtered) {
-  let n = 0, total = 0, sum = 0, mn = Infinity, mx = -Infinity;
+  const mv = cfg.minValue ?? null;
+  let n = 0, total = 0, sum = 0, mn = Infinity, mx = -Infinity, above = 0, finite = 0;
   for (let k = 0; k < arr.length; k++) {
     const v = arr[k];
     if (!Number.isFinite(v)) continue;
+    finite++;
+    if (mv != null && v < mv) continue; // por debajo del mínimo: ni pintado ni contado
+    above++;
     total++;
     if (!okv(k, v)) continue;
     n++; sum += v; if (v < mn) mn = v; if (v > mx) mx = v;
@@ -578,14 +619,16 @@ function rawTiles(cfg, layers, arr, name, okv, filtered) {
   const tiles = n === 0
     ? [[`${name}${w}`, "sin celdas"]]
     : [[`${name}${w} · mínimo`, mn.toFixed(vd) + vu], [`${name}${w} · media`, (sum / n).toFixed(vd) + vu], [`${name}${w} · máximo`, mx.toFixed(vd) + vu]];
+  if (mv != null) tiles.push([`${name} · celdas con ≥ ${num(mv)} ${vu.trim()}`, `${(100 * above / finite).toFixed(1)} %`]);
   if (filtered) tiles.push([`${name} · celdas que cumplen los filtros`, `${(100 * n / total).toFixed(1)} %`]);
   return tiles;
 }
 
 function drawStats(cfg, layers) {
   const m = filterMatcher(), em = state.cellMask, filtered = !!(m || em), tiles = [];
-  const okv = (k, v) => (!em || em[k] === 1) && (!m || m(v));
-  const okd = k => (!em || em[k] === 1) && (!m || m(layers.a[k]) || m(layers.b[k]));
+  const okv = (k, v) => (!em || em[k] === 1) && (!m || m(v)); // el mínimo (minValue) lo aplica rawTiles
+  const mv = cfg.minValue ?? null;
+  const okd = k => (!em || em[k] === 1) && (mv == null || layers.a[k] >= mv || layers.b[k] >= mv) && (!m || m(layers.a[k]) || m(layers.b[k]));
   if (state.shown.a) tiles.push(...rawTiles(cfg, layers, layers.a, panelName("a"), okv, filtered));
   if (state.shown.b && layers.b) tiles.push(...rawTiles(cfg, layers, layers.b, panelName("b"), okv, filtered));
   if (state.shown.diff && layers.diff) tiles.push(...diffTiles(cfg, layers, okd, filtered));
