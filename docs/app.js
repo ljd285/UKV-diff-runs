@@ -250,13 +250,26 @@ function refreshLeads(wanted) {
 }
 const currentLead = () => leads[Number($("lead").value)];
 
-function readControls() {
+function runTime() {
   const [y, m, d] = $("date").value.split("-").map(Number);
-  const tA = Date.UTC(y, m - 1, d) + Number($("run").value) * HOUR;
+  return Date.UTC(y, m - 1, d) + Number($("run").value) * HOUR;
+}
+
+function readControls() {
+  const tA = runTime();
   const lead = currentLead(), off = Number($("offset").value), key = $("variable").value;
   return { key, cfg: VARIABLES[key], tA, lead, tB: tA - off * HOUR, leadB: lead + off, off };
 }
-const fmt = t => { const d = new Date(t); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}Z`; };
+// Fechas en español, siempre en UTC ("Z"): "21Z Sábado 10 de octubre", y su forma corta "21Z sáb 10 oct" para los títulos.
+const WEEKDAYS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+const MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const hourText = t => `${pad(new Date(t).getUTCHours())}Z`;
+const dayText = t => { const d = new Date(t); return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()} de ${MONTHS[d.getUTCMonth()]}`; };
+const stampText = t => `${hourText(t)} ${dayText(t)}`;
+const shortStamp = t => { const d = new Date(t); return `${hourText(t)} ${WEEKDAYS[d.getUTCDay()].slice(0, 3).toLowerCase()} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].slice(0, 3)}`; };
+// Pronóstico: "+30h 21Z Sábado 10 de octubre" (alcance y hora/fecha de validez de una salida iniciada en `tInit`).
+const fcText = (tInit, lead) => `+${lead}h ${stampText(tInit + lead * HOUR)}`;
+const sameDay = (t1, t2) => new Date(t1).toUTCString().slice(0, 16) === new Date(t2).toUTCString().slice(0, 16);
 
 // Solo errores: mientras carga no se muestra texto (cambiaba la altura de la página y desplazaba el mapa).
 function setStatus(msg = "") { const s = $("status"); s.textContent = msg; s.className = "info" + (msg ? " err" : ""); }
@@ -272,12 +285,17 @@ async function update() {
   const c = readControls();
   const token = ++state.token;
   if (c.lead === undefined) { setStatus("Esta variable no tiene alcances comunes para ese desfase."); return; }
-  $("leadLabel").textContent = c.cfg.static ? "no aplica" : `+${c.lead} h`;
+  $("leadLabel").textContent = c.cfg.static ? "no aplica" : fcText(c.tA, c.lead);
   $("info").innerHTML = c.cfg.static
     ? "Relieve del modelo UKV 2 km · no varía con la salida ni con el alcance"
     : c.cfg.accum
-      ? `Acumulado de <b>${c.cfg.accum.hours} h</b> · de ${fmt(c.tA + (c.lead - c.cfg.accum.hours) * HOUR)} a <b>${fmt(c.tA + c.lead * HOUR)}</b> (validez)`
-      : `Validez <b>${fmt(c.tA + c.lead * HOUR)}</b>`;
+      ? (() => { // misma fecha: "de 06Z a 12Z del Sábado 10 de octubre"; si no, las dos con su fecha
+          const t0 = c.tA + (c.lead - c.cfg.accum.hours) * HOUR, t1 = c.tA + c.lead * HOUR;
+          return `Acumulado de <b>${c.cfg.accum.hours} h</b> · ` + (sameDay(t0, t1)
+            ? `de ${hourText(t0)} a <b>${hourText(t1)}</b> del ${dayText(t1)} (validez)`
+            : `de ${stampText(t0)} a <b>${stampText(t1)}</b> (validez)`);
+        })()
+      : `Validez <b>${stampText(c.tA + c.lead * HOUR)}</b>`;
   setStatus();
   $("maps").classList.add("loading");
   try {
@@ -293,7 +311,11 @@ async function update() {
     syncElevUI();
     state.cfg = c.cfg;
     state.layers = compute(c.cfg, SA, SB);
-    state.meta = { a: c.cfg.static ? "UKV 2 km" : `${fmt(c.tA)} +${c.lead} h`, b: needB ? `${fmt(c.tB)} +${c.leadB} h` : "" };
+    state.meta = c.cfg.static
+      ? { a: { run: "UKV 2 km", fc: "" } }
+      : { a: { run: `salida ${shortStamp(c.tA)}`, fc: fcText(c.tA, c.lead) },
+          b: needB ? { run: `salida ${shortStamp(c.tB)}`, fc: fcText(c.tB, c.leadB) } : null,
+          diff: { run: "última − anterior", fc: `validez ${stampText(c.tA + c.lead * HOUR)}` } };
     state.images = {}; state.arrowCache.clear();
     drawAll();
     drawStats(c.cfg, state.layers);
@@ -476,10 +498,11 @@ function drawPanel(p) {
   }
 
   // Título y leyenda
-  const meta = p.kind === "diff" ? "última − anterior" : state.meta[p.kind];
+  const meta = state.meta[p.kind] ?? { run: "", fc: "" };
   const ft = filterText(), et = elevText();
   const flt = [ft && `${p.kind === "diff" ? "valor en alguna salida" : "valor"} ${ft}`, et].filter(Boolean).join(" · ");
-  p.caption.innerHTML = `<b>${panelName(p.kind)}</b> <span>· ${meta}</span>` +
+  // línea 1: salida (o "última − anterior"); línea 2: alcance y fecha del pronóstico; línea 3 (reservada): filtros
+  p.caption.innerHTML = `<b>${panelName(p.kind)}</b> <span>· ${meta.run}</span><span class="fc">${meta.fc || "&nbsp;"}</span>` +
     // línea reservada aunque no haya filtro: así activarlo o quitarlo no desplaza los mapas
     `<span class="flt">${flt ? `solo: ${flt}` : ""}</span>`;
   drawLegend(p, cfg, L, img);
@@ -811,7 +834,7 @@ function init() {
   // El deslizador actualiza la etiqueta al instante y descarga al soltar/pausar, no en cada paso.
   let timer;
   $("lead").addEventListener("input", () => {
-    $("leadLabel").textContent = `+${currentLead()} h`;
+    $("leadLabel").textContent = fcText(runTime(), currentLead());
     clearTimeout(timer); timer = setTimeout(update, 150);
   });
   const nudge = k => { $("lead").value = Math.min(leads.length - 1, Math.max(0, Number($("lead").value) + k)); update(); };

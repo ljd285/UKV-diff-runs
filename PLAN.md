@@ -181,3 +181,10 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 
 - `minValue` de **velocidad del viento, racha, dirección y vectores: 2 mph** (antes 0,1). Las celdas con menos de 2 mph no se pintan, no cuentan en las estadísticas y sus flechas se omiten; la leyenda lo indica. La precipitación (tasa y acumulados) mantiene 0,1.
 - Efecto medido (salida 03Z del 8 oct, +24 h): viento 0,59 % de las celdas sin pintar, racha 0,02 %. El mapa de la diferencia de dirección además descarta, como antes, las celdas con viento < 1,5 m/s (≈ 3,4 mph) en alguna de las dos salidas.
+
+## Formato de fecha del pronóstico (9 oct)
+
+- El alcance se muestra siempre como **alcance + hora y fecha de validez**, en español y en UTC: `+30h 21Z Sábado 10 de octubre`. Sale en la etiqueta del deslizador y en el título de cada mapa.
+- **Título de cada mapa en dos líneas** (más la línea reservada de filtros): 1) nombre y salida en forma corta (`Última salida · salida 15Z vie 9 oct`); 2) alcance y fecha del pronóstico (`+30h 21Z Sábado 10 de octubre`). La salida anterior lleva su propio alcance (`+42h …`), y la diferencia, `validez …`. Las tres líneas tienen altura fija, así que los mapas siguen alineados.
+- **Línea de validez:** `Validez 21Z Sábado 10 de octubre`; en los acumulados, `Acumulado de 6 h · de 15Z a 21Z del Sábado 10 de octubre`, o con las dos fechas completas si cruza medianoche.
+- Helpers en `docs/app.js`: `hourText`, `dayText`, `stampText`, `shortStamp` y `fcText`.
