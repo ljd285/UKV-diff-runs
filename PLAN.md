@@ -176,3 +176,8 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Caché con límite** (60 campos, el menos usado se descarta): cada campo ocupa ~4 MB y recorrer acumulados de 12 h llenaría la memoria. El relieve y la máscara tierra/mar se guardan aparte.
 - **Escalas fijas elegidas:** 3 h: ±5 mm / mapa 0…20 mm; 6 h: ±10 / 0…40; 12 h: ±15 / 0…60 (paletas radar y marrón–verdeazulado, como la tasa de precipitación). Atajos del filtro: > 1, 5, 10 mm (3 h); > 1, 10, 20 mm (6 h); > 1, 10, 25, 40 mm (12 h).
 - **Valores mínimos (`minValue: 0.1`)** en viento, racha, dirección, vectores, tasa y acumulados: las celdas por debajo no se pintan, no cuentan en las estadísticas y sus flechas se omiten; en la diferencia solo se omite una celda si está por debajo **en las dos salidas**. Se aplica en la unidad mostrada (mph, mm/h, mm). Nuevo dato en las estadísticas: % de celdas con valor ≥ mínimo (p. ej. área con lluvia) y nota en la leyenda. Efecto medido: tasa de precipitación 79,6 % de las celdas excluidas; viento y racha ~0 % (a 0,1 mph casi no hay celdas en calma).
+
+## Mínimo de viento a 2 mph (9 oct)
+
+- `minValue` de **velocidad del viento, racha, dirección y vectores: 2 mph** (antes 0,1). Las celdas con menos de 2 mph no se pintan, no cuentan en las estadísticas y sus flechas se omiten; la leyenda lo indica. La precipitación (tasa y acumulados) mantiene 0,1.
+- Efecto medido (salida 03Z del 8 oct, +24 h): viento 0,59 % de las celdas sin pintar, racha 0,02 %. El mapa de la diferencia de dirección además descarta, como antes, las celdas con viento < 1,5 m/s (≈ 3,4 mph) en alguna de las dos salidas.

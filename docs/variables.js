@@ -72,12 +72,12 @@ export const VARIABLES = {
 
   wind: {
     label: "Velocidad del viento", group: "wind", file: "wind_speed_at_10m", leads: "std",
-    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 7, range: [0, 55], palette: { map: "plasma", diff: "prgn" }, minValue: 0.1, thresh: 5,
+    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 7, range: [0, 55], palette: { map: "plasma", diff: "prgn" }, minValue: 2, thresh: 5,
     pos: "más fuerte", neg: "más débil",
   },
   gust: {
     label: "Racha de viento", group: "wind", file: "wind_gust_at_10m", leads: "std",
-    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 10, range: [0, 80], palette: { map: "plasma", diff: "prgn" }, minValue: 0.1, thresh: 10,
+    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 10, range: [0, 80], palette: { map: "plasma", diff: "prgn" }, minValue: 2, thresh: 10,
     pos: "más fuerte", neg: "más débil",
   },
 
@@ -85,14 +85,14 @@ export const VARIABLES = {
     label: "Dirección del viento (diferencia)", group: "wind", kind: "wdiff", leads: "std",
     files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
     unit: "°", factor: 1, offset: 0, decimals: 0, viewUnit: "mph", viewFactor: 2.23694, viewDecimals: 1,
-    diffScale: 30, range: [0, 55], palette: { map: "plasma", diff: "brbg" }, minValue: 0.1, thresh: 30, minSpeed: 1.5, // minSpeed en m/s (valor del fichero)
+    diffScale: 30, range: [0, 55], palette: { map: "plasma", diff: "brbg" }, minValue: 2, thresh: 30, minSpeed: 1.5, // minSpeed en m/s (valor del fichero)
     pos: "rolada en sentido horario", neg: "rolada en sentido antihorario",
   },
   wvec: {
     label: "Viento (vectores)", group: "wind", kind: "vector", leads: "std",
     files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
     unit: "mph", factor: 2.23694, offset: 0, decimals: 1, viewUnit: "mph", viewFactor: 2.23694, viewDecimals: 1,
-    diffScale: 7, range: [0, 55], palette: { map: "viridis", diff: "ylorrd" }, minValue: 0.1, thresh: 5, pos: "", neg: "",
+    diffScale: 7, range: [0, 55], palette: { map: "viridis", diff: "ylorrd" }, minValue: 2, thresh: 5, pos: "", neg: "",
   },
 
   orog: {
