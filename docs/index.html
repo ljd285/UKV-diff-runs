@@ -55,7 +55,8 @@
   /* Barra arriba a todo el ancho y las dos etiquetas debajo, una a cada lado: no se rompe en paneles estrechos. */
   .legend { display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; margin-top:8px; font-size:.75rem; color:var(--muted); }
   .legend canvas { grid-column:1 / -1; grid-row:1; width:100%; height:10px; border-radius:3px; border:1px solid var(--line); }
-  .legend span:last-child { text-align:right; }
+  .legend .r { text-align:right; }
+  .legend .note { grid-column:1 / -1; font-size:.72rem; }
   #arrowkey { font-size:.8rem; color:var(--muted); margin-top:10px; }
   #arrowkey b { display:inline-block; width:18px; height:3px; vertical-align:middle; border-radius:2px; }
 

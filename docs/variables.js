@@ -15,6 +15,10 @@
 //                     (p. ej. presión centrada en 1004 hPa); el rango [min, max] no tiene por qué ser simétrico.
 //   filterPresets     Atajos del filtro de valores: [{label, op: "lt" | "gt" | "between", v, v2?}] en la unidad de los mapas
 //                     (`viewUnit ?? unit`). En el visor el filtro admite además cualquier umbral escrito a mano.
+//   accum             {hours, hourly, block}: acumulado de `hours` horas hasta la hora de validez, sumando ficheros.
+//                     Hasta +54 h hay un fichero por hora (`hourly`); de +57 a +120 h, uno por cada 3 h (`block`).
+//   minValue          Valor mínimo mostrado (en la unidad de los mapas): las celdas por debajo no se pintan ni cuentan en
+//                     las estadísticas; en la diferencia se omiten solo las celdas que están por debajo en ambas salidas.
 //   static            true: no varía con la salida ni con el alcance (p. ej. el relieve). Se muestra solo en bruto,
 //                     sin comparación, y se lee siempre del alcance 0.
 //   range             Rango FIJO [min, max] de los mapas de cada salida, en la unidad mostrada (viewUnit para el viento).
@@ -47,6 +51,12 @@ export const GROUPS = [
 const KELVIN = { factor: 1, offset: -273.15, unit: "°C", decimals: 1, diffScale: 3, range: [-10, 30], thresh: 1, pos: "más cálida", neg: "más fría",
   palette: { map: "clasica", diff: "azul-rojo" } };
 
+// Base común de los acumulados de precipitación (equivalente líquido). Los ficheros vienen en metros: × 1000 = mm.
+const ACCUM = hours => ({
+  group: "precip", leads: "std", accum: { hours, hourly: "precipitation_accumulation-PT01H", block: "precipitation_accumulation-PT03H" },
+  unit: "mm", factor: 1000, offset: 0, decimals: 1, palette: { map: "radar", diff: "brbg" }, pos: "más lluvia", neg: "menos lluvia", minValue: 0.1,
+});
+
 export const VARIABLES = {
   t:    { ...KELVIN, label: "Temperatura a 1,5 m", group: "temp", file: "temperature_at_screen_level", leads: "any" },
   tmax: { ...KELVIN, label: "Temperatura máxima (última hora)", group: "temp", file: "temperature_at_screen_level_max-PT01H", leads: "any", minLead: 1, range: [-5, 35] },
@@ -62,12 +72,12 @@ export const VARIABLES = {
 
   wind: {
     label: "Velocidad del viento", group: "wind", file: "wind_speed_at_10m", leads: "std",
-    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 7, range: [0, 55], palette: { map: "plasma", diff: "prgn" }, thresh: 5,
+    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 7, range: [0, 55], palette: { map: "plasma", diff: "prgn" }, minValue: 0.1, thresh: 5,
     pos: "más fuerte", neg: "más débil",
   },
   gust: {
     label: "Racha de viento", group: "wind", file: "wind_gust_at_10m", leads: "std",
-    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 10, range: [0, 80], palette: { map: "plasma", diff: "prgn" }, thresh: 10,
+    unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 10, range: [0, 80], palette: { map: "plasma", diff: "prgn" }, minValue: 0.1, thresh: 10,
     pos: "más fuerte", neg: "más débil",
   },
 
@@ -75,14 +85,14 @@ export const VARIABLES = {
     label: "Dirección del viento (diferencia)", group: "wind", kind: "wdiff", leads: "std",
     files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
     unit: "°", factor: 1, offset: 0, decimals: 0, viewUnit: "mph", viewFactor: 2.23694, viewDecimals: 1,
-    diffScale: 30, range: [0, 55], palette: { map: "plasma", diff: "brbg" }, thresh: 30, minSpeed: 1.5, // minSpeed en m/s (valor del fichero)
+    diffScale: 30, range: [0, 55], palette: { map: "plasma", diff: "brbg" }, minValue: 0.1, thresh: 30, minSpeed: 1.5, // minSpeed en m/s (valor del fichero)
     pos: "rolada en sentido horario", neg: "rolada en sentido antihorario",
   },
   wvec: {
     label: "Viento (vectores)", group: "wind", kind: "vector", leads: "std",
     files: { dir: "wind_direction_at_10m", speed: "wind_speed_at_10m" },
     unit: "mph", factor: 2.23694, offset: 0, decimals: 1, viewUnit: "mph", viewFactor: 2.23694, viewDecimals: 1,
-    diffScale: 7, range: [0, 55], palette: { map: "viridis", diff: "ylorrd" }, thresh: 5, pos: "", neg: "",
+    diffScale: 7, range: [0, 55], palette: { map: "viridis", diff: "ylorrd" }, minValue: 0.1, thresh: 5, pos: "", neg: "",
   },
 
   orog: {
@@ -102,9 +112,15 @@ export const VARIABLES = {
     pos: "más nublada", neg: "más despejada",
   },
 
+  acc3:  { ...ACCUM(3),  label: "Acumulado de 3 h",  diffScale: 5,  range: [0, 20], thresh: 2,
+           filterPresets: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 5 mm", op: "gt", v: 5 }, { label: "> 10 mm", op: "gt", v: 10 }] },
+  acc6:  { ...ACCUM(6),  label: "Acumulado de 6 h",  diffScale: 10, range: [0, 40], thresh: 5,
+           filterPresets: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 10 mm", op: "gt", v: 10 }, { label: "> 20 mm", op: "gt", v: 20 }] },
+  acc12: { ...ACCUM(12), label: "Acumulado de 12 h", diffScale: 15, range: [0, 60], thresh: 5,
+           filterPresets: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 10 mm", op: "gt", v: 10 }, { label: "> 25 mm", op: "gt", v: 25 }, { label: "> 40 mm", op: "gt", v: 40 }] },
   precip: {
     label: "Tasa de precipitación (equiv. líquido)", group: "precip", file: "precipitation_rate", leads: "std",
-    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 4], palette: { map: "radar", diff: "brbg" }, thresh: 0.25,
+    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 4], palette: { map: "radar", diff: "brbg" }, minValue: 0.1, thresh: 0.25,
     pos: "más lluvia", neg: "menos lluvia",
   },
 };
@@ -124,6 +140,8 @@ export const MAX_LEAD = 120;
 // ¿Existe fichero para este alcance (horas)?
 export function leadExists(cfg, h) {
   if (h < (cfg.minLead ?? 0) || h > MAX_LEAD) return false;
+  // un acumulado de N h necesita N h de pronóstico y que su final caiga en una hora con fichero
+  if (cfg.accum) return h >= cfg.accum.hours && (h <= 54 || (h - 54) % 3 === 0);
   return cfg.leads === "any" || h <= 54 || (h - 54) % 3 === 0;
 }
 
