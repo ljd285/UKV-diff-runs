@@ -208,3 +208,10 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Grupo Nieve:** tasa (`snowfall_rate`, mm/h de equivalente líquido; rango 0…2, ±0,5, mínimo 0,05); acumulados de 3/6/12 h (`snowfall_accumulation-PT01H`/`-PT03H`, misma lógica que la lluvia; rangos 0…10/20/30 mm, ±3/5/10); **cota de nieve** = cota 0 °C de bulbo húmedo (`height_AGL_at_wet_bulb_freezing_level`). El fichero da la altura **sobre el suelo**: con `addTerrain: true` el visor le suma el relieve para mostrarla sobre el nivel del mar (rango 0…3000 m, ±200 m). Paleta nueva «Nieve» (azul→violeta) con diferencia marrón–verdeazulado; la cota usa «clásica» + azul–rojo.
 - **Grupo Visibilidad y niebla:** visibilidad (`visibility_at_screen_level`, m → km; rango 0…20 km, ±5 km; paleta nueva «Visibilidad», poca visibilidad = intenso) y probabilidad de niebla (`fog_fraction_at_screen_level`, 0…100 %, ±25, mínimo 5 %, grises + púrpura–verde). Atajos de filtro: niebla < 1 km, < 5 km, < 10 km.
 - Probado en Chromium con datos reales (salida 15Z del 13 oct): todas cargan, sin errores en consola. Escalas elegidas como primera propuesta, pendientes de ajuste si no convencen.
+
+## Ajustes de escalas de nieve y visibilidad (14 oct)
+
+- **Cota de nieve:** rango 0…1000 m (el relieve del Reino Unido no pasa de ~1300 m, así que más arriba no aporta) con la paleta nueva «Frío→calor» (azul oscuro = nieve a nivel del mar → crema → naranja). Diferencia ±200 m sin cambios.
+- **Tasa de nieve:** rango 0…4 mm/h.
+- **Visibilidad:** las celdas por encima de 20 km no se pintan (se ve el fondo). Nuevo campo `maxValue` (análogo a `minValue`): solo afecta al dibujo, no a las estadísticas; en la diferencia se omite una celda si está por encima en las dos salidas; la leyenda lo indica.
+- Probado con la salida 15Z del 5 ene 2026 (fría: mediana de la cota 215 m).

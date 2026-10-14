@@ -367,7 +367,7 @@ function getImage(kind) {
     [lo, hi] = cfg.range; table = paletteLUT(pal.map); center = cfg.center ?? null;
   }
   const img = new ImageData(nx, ny), px = img.data;
-  const m = filterMatcher(), em = state.cellMask, mv = cfg.minValue ?? null; // filtro: en la diferencia basta con que cumpla alguna de las dos salidas
+  const m = filterMatcher(), em = state.cellMask, mv = cfg.minValue ?? null, xv = cfg.maxValue ?? null; // filtro: en la diferencia basta con que cumpla alguna de las dos salidas
   for (let r = 0; r < ny; r++) {
     const j = ny - 1 - r; // la malla va de sur a norte
     for (let i = 0; i < nx; i++) {
@@ -376,6 +376,8 @@ function getImage(kind) {
       if (em && !em[k]) continue;
       // por debajo del mínimo no se pinta; en la diferencia, solo si lo está en las dos salidas
       if (mv != null && (kind === "diff" ? layers.a[k] < mv && layers.b[k] < mv : v < mv)) continue;
+      // por encima del máximo (p. ej. visibilidad > 20 km) tampoco; en la diferencia, solo si lo está en las dos salidas
+      if (xv != null && (kind === "diff" ? layers.a[k] > xv && layers.b[k] > xv : v > xv)) continue;
       if (m && !(kind === "diff" ? m(layers.a[k]) || m(layers.b[k]) : m(v))) continue;
       const o = (r * nx + i) * 4;
       const t = lutIndex(v, lo, hi, center);
@@ -565,10 +567,11 @@ function drawLegend(p, cfg, layers, img) {
   }
   right.className = "r";
   lg.append(bar, left, right);
-  if (cfg.minValue != null) { // aviso de lo que no se pinta
+  if (cfg.minValue != null || cfg.maxValue != null) { // aviso de lo que no se pinta
     const note = document.createElement("span");
     note.className = "note";
-    note.textContent = `Sin pintar: valores < ${num(cfg.minValue)} ${vu}${p.kind === "diff" ? " (en la diferencia, solo donde ambas salidas están por debajo)" : ""}`;
+    const what = [cfg.minValue != null ? `< ${num(cfg.minValue)}` : null, cfg.maxValue != null ? `> ${num(cfg.maxValue)}` : null].filter(Boolean).join(" ni ");
+    note.textContent = `Sin pintar: valores ${what} ${vu}${p.kind === "diff" ? " (en la diferencia, solo donde ambas salidas están fuera del rango)" : ""}`;
     lg.append(note);
   }
 }

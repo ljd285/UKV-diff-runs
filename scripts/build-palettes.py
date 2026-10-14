@@ -31,6 +31,8 @@ SEQUENTIAL = {
                     dark=["#2a3f5a", "#4a86d6", "#7fb0ee", "#b79cf0", "#f0b6f5"]),
     "visib":   dict(label="Visibilidad (poca = intenso)", stops=["#5b1a6b", "#b3263e", "#f08a2a", "#f1e04a", "#dcebd2"],
                     dark=["#f0a6f0", "#ff6a5a", "#f2902f", "#7a7a30", "#262b31"]),
+    "frio-calor": dict(label="Frío→calor", stops=["#08306b", "#2171b5", "#9ecae1", "#fff7bc", "#fe9929", "#cc4c02"],
+                    dark=["#08306b", "#2171b5", "#9ecae1", "#fff7bc", "#fe9929", "#ff7a2e"]),
     "radar":   dict(label="Radar", stops=["#eef2f6", "#a7dcae", "#4cb85a", "#f4e04d", "#f2902f", "#d8261d", "#a01a94"],
                     dark=["#262b31", "#3f7f4c", "#4cb85a", "#f4e04d", "#f2902f", "#ff5a4a", "#d36bd0"]),
     "relieve": dict(label="Relieve", stops=["#d7e8d4", "#9ccb86", "#e3d77a", "#c99a52", "#8c5e3c", "#f4f1ec"],

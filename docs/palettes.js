@@ -190,6 +190,25 @@ export const SEQUENTIAL = {
       "#262b31"
     ]
   },
+  "frio-calor": {
+    "label": "Frío→calor",
+    "stops": [
+      "#08306b",
+      "#2171b5",
+      "#9ecae1",
+      "#fff7bc",
+      "#fe9929",
+      "#cc4c02"
+    ],
+    "dark": [
+      "#08306b",
+      "#2171b5",
+      "#9ecae1",
+      "#fff7bc",
+      "#fe9929",
+      "#ff7a2e"
+    ]
+  },
   "radar": {
     "label": "Radar",
     "stops": [

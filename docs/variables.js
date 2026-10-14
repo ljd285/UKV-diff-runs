@@ -19,6 +19,8 @@
 //                     Hasta +54 h hay un fichero por hora (`hourly`); de +57 a +120 h, uno por cada 3 h (`block`).
 //   minValue          Valor mínimo mostrado (en la unidad de los mapas): las celdas por debajo no se pintan ni cuentan en
 //                     las estadísticas; en la diferencia se omiten solo las celdas que están por debajo en ambas salidas.
+//   maxValue          Valor máximo mostrado (en la unidad de los mapas): las celdas por encima no se pintan (se ve el fondo);
+//                     solo afecta al dibujo, no a las estadísticas. En la diferencia se omiten si lo están en ambas salidas.
 //   static            true: no varía con la salida ni con el alcance (p. ej. el relieve). Se muestra solo en bruto,
 //                     sin comparación, y se lee siempre del alcance 0.
 //   range             Rango FIJO [min, max] de los mapas de cada salida, en la unidad mostrada (viewUnit para el viento).
@@ -129,7 +131,7 @@ export const VARIABLES = {
            filterPresets: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 10 mm", op: "gt", v: 10 }, { label: "> 25 mm", op: "gt", v: 25 }, { label: "> 40 mm", op: "gt", v: 40 }] },
   snow: {
     label: "Nieve: tasa (equiv. líquido)", group: "snow", file: "snowfall_rate", leads: "std",
-    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 2], palette: { map: "nieve", diff: "brbg" }, minValue: 0.05, thresh: 0.25,
+    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 4], palette: { map: "nieve", diff: "brbg" }, minValue: 0.05, thresh: 0.25,
     pos: "más nieve", neg: "menos nieve",
   },
   snow3:  { ...SNOWACC(3),  label: "Nieve: acumulado de 3 h (equiv. líquido)",  diffScale: 3,  range: [0, 10], thresh: 1 },
@@ -137,13 +139,13 @@ export const VARIABLES = {
   snow12: { ...SNOWACC(12), label: "Nieve: acumulado de 12 h (equiv. líquido)", diffScale: 10, range: [0, 30], thresh: 5 },
   snowline: {
     label: "Cota de nieve (0 °C de bulbo húmedo)", group: "snow", file: "height_AGL_at_wet_bulb_freezing_level", leads: "std", addTerrain: true,
-    unit: "m", factor: 1, offset: 0, decimals: 0, diffScale: 200, range: [0, 3000], palette: { map: "clasica", diff: "azul-rojo" }, thresh: 200,
+    unit: "m", factor: 1, offset: 0, decimals: 0, diffScale: 200, range: [0, 1000], palette: { map: "frio-calor", diff: "azul-rojo" }, thresh: 200,
     pos: "cota más alta", neg: "cota más baja",
   },
 
   vis: {
     label: "Visibilidad", group: "vis", file: "visibility_at_screen_level", leads: "std",
-    unit: "km", factor: 0.001, offset: 0, decimals: 1, diffScale: 5, range: [0, 20], palette: { map: "visib", diff: "brbg" }, thresh: 2,
+    unit: "km", factor: 0.001, offset: 0, decimals: 1, diffScale: 5, range: [0, 20], palette: { map: "visib", diff: "brbg" }, maxValue: 20, thresh: 2,
     pos: "más visibilidad", neg: "menos visibilidad",
   },
   fog: {
