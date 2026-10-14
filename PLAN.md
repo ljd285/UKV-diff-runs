@@ -188,3 +188,11 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Título de cada mapa en dos líneas** (más la línea reservada de filtros): 1) nombre y salida en forma corta (`Última salida · salida 15Z vie 9 oct`); 2) alcance y fecha del pronóstico (`+30h 21Z Sábado 10 de octubre`). La salida anterior lleva su propio alcance (`+42h …`), y la diferencia, `validez …`. Las tres líneas tienen altura fija, así que los mapas siguen alineados.
 - **Línea de validez:** `Validez 21Z Sábado 10 de octubre`; en los acumulados, `Acumulado de 6 h · de 15Z a 21Z del Sábado 10 de octubre`, o con las dos fechas completas si cruza medianoche.
 - Helpers en `docs/app.js`: `hourText`, `dayText`, `stampText`, `shortStamp` y `fcText`.
+
+## Prueba de maquetación: panel lateral, plegable y barra de tiempo fija (14 oct)
+
+- **Dos disposiciones** con un interruptor en la cabecera (se recuerda en `localStorage`): «Panel a la izquierda» (columna de 340 px fija al desplazar) y «Panel arriba» (la de antes).
+- **Panel de ajustes plegable** (`☰ Mostrar ajustes` / `✕ Ocultar ajustes`), también recordado. Plegado, los mapas ocupan todo el ancho.
+- **Barra de tiempo siempre visible** (sticky, fuera del panel): botón de plegar, ◀ ▶, etiqueta de alcance y deslizador. Funciona con el panel plegado y con la página desplazada. El aviso de estado/error es una superposición bajo la barra, así que ya no desplaza los mapas.
+- **Mapas más pequeños:** la altura se limita a la ventana (`--mapH = max(360px, 100vh − 290px)`) y el ancho sigue la proporción de la zona (`--ar`).
+- Medido en 1400×900: mapa lateral 445×610; 3 mapas 313×429; plegado 430×590; barra fija a y=8 tras desplazar 700 px; sin errores en consola. En pantallas ≤ 900 px el panel lateral pasa arriba.
