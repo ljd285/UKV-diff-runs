@@ -136,7 +136,8 @@ async function loadAccum(cycleT, lead, cfg) {
 // Una salida de una variable: {main} o, para el viento, {dir, speed}.
 async function loadSet(cycleT, lead, cfg) {
   if (cfg.accum) return loadAccum(cycleT, lead, cfg);
-  const files = cfg.files ?? { main: cfg.file };
+  // fileByLead: el nombre del fichero cambia con el alcance (PT01H hasta +54 h, PT03H desde +57 h)
+  const files = cfg.files ?? { main: cfg.fileByLead ? (lead <= 54 ? cfg.fileByLead.hourly : cfg.fileByLead.block) : cfg.file };
   const entries = await Promise.all(Object.entries(files).map(async ([k, f]) => [k, await loadField(cycleT, lead, f)]));
   return Object.fromEntries(entries);
 }
@@ -144,7 +145,7 @@ async function loadSet(cycleT, lead, cfg) {
 // ---------- Cálculo de capas ----------
 // Devuelve, en la unidad mostrada: a (campo de la última salida) y, si hay salida anterior (SB), b y diff (diferencia).
 // Para el viento añade dirección/velocidad crudas, de las que salen las flechas.
-function compute(cfg, SA, SB) {
+function compute(cfg, SA, SB, orog) {
   const kind = cfg.kind ?? "scalar";
   const grid = (SA.main ?? SA.speed);
   const n = grid.nx * grid.ny;
@@ -152,10 +153,12 @@ function compute(cfg, SA, SB) {
 
   if (kind === "scalar") {
     const a = new Float32Array(n), b = SB ? new Float32Array(n) : null;
+    // addTerrain: el fichero da la altura sobre el suelo; se suma el relieve para mostrarla sobre el nivel del mar
+    const t = cfg.addTerrain && orog ? orog : null;
     for (let i = 0; i < n; i++) {
-      a[i] = SA.main.data[i] * cfg.factor + cfg.offset;
+      a[i] = SA.main.data[i] * cfg.factor + cfg.offset + (t ? t[i] : 0);
       if (SB) {
-        b[i] = SB.main.data[i] * cfg.factor + cfg.offset;
+        b[i] = SB.main.data[i] * cfg.factor + cfg.offset + (t ? t[i] : 0);
         diff[i] = (SA.main.data[i] - SB.main.data[i]) * cfg.factor;
       }
     }
@@ -295,7 +298,8 @@ async function update() {
             ? `de ${hourText(t0)} a <b>${hourText(t1)}</b> del ${dayText(t1)} (validez)`
             : `de ${stampText(t0)} a <b>${stampText(t1)}</b> (validez)`);
         })()
-      : `Validez <b>${stampText(c.tA + c.lead * HOUR)}</b>`;
+      : `Validez <b>${stampText(c.tA + c.lead * HOUR)}</b>` +
+        (c.cfg.fileByLead ? ` · máximo de ${c.lead <= 54 ? "la hora previa" : "las 3 h previas"}` : "");
   setStatus();
   $("maps").classList.add("loading");
   try {
@@ -310,7 +314,7 @@ async function update() {
     rebuildCellMask();
     syncElevUI();
     state.cfg = c.cfg;
-    state.layers = compute(c.cfg, SA, SB);
+    state.layers = compute(c.cfg, SA, SB, state.orog);
     state.meta = c.cfg.static
       ? { a: { run: "UKV 2 km", fc: "" } }
       : { a: { run: `salida ${shortStamp(c.tA)}`, fc: fcText(c.tA, c.lead) },

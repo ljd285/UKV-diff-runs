@@ -201,3 +201,10 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 
 - Nubosidad total: mapa con la paleta **«Sol–nube»** (amarillo = despejado → gris → azul pizarra = cubierto; nueva en `docs/palettes.js`, con versión oscura propia) y diferencia **púrpura–naranja** (púrpura = más despejada, naranja = más nublada). Rango fijo 0…100 %, diferencia ±25 %, sin cambios.
 - Descartadas: viridis (la anterior; el amarillo vivo sobre el cielo cubierto era poco intuitivo), «Cielo» azul→blanco y Cividis.
+
+## Nieve, visibilidad/niebla y racha máxima (14 oct)
+
+- **Racha de viento sustituida** por la **racha máxima del periodo** (`wind_gust_at_10m_max-PT01H` hasta +54 h; `-PT03H` de +57 a +120 h). Nuevo campo `fileByLead` (el nombre del fichero depende del alcance); alcances desde +1 h. La línea de validez indica «máximo de la hora previa / de las 3 h previas». La clave interna sigue siendo `gust`; mismas escalas (0…80 mph, ±10).
+- **Grupo Nieve:** tasa (`snowfall_rate`, mm/h de equivalente líquido; rango 0…2, ±0,5, mínimo 0,05); acumulados de 3/6/12 h (`snowfall_accumulation-PT01H`/`-PT03H`, misma lógica que la lluvia; rangos 0…10/20/30 mm, ±3/5/10); **cota de nieve** = cota 0 °C de bulbo húmedo (`height_AGL_at_wet_bulb_freezing_level`). El fichero da la altura **sobre el suelo**: con `addTerrain: true` el visor le suma el relieve para mostrarla sobre el nivel del mar (rango 0…3000 m, ±200 m). Paleta nueva «Nieve» (azul→violeta) con diferencia marrón–verdeazulado; la cota usa «clásica» + azul–rojo.
+- **Grupo Visibilidad y niebla:** visibilidad (`visibility_at_screen_level`, m → km; rango 0…20 km, ±5 km; paleta nueva «Visibilidad», poca visibilidad = intenso) y probabilidad de niebla (`fog_fraction_at_screen_level`, 0…100 %, ±25, mínimo 5 %, grises + púrpura–verde). Atajos de filtro: niebla < 1 km, < 5 km, < 10 km.
+- Probado en Chromium con datos reales (salida 15Z del 13 oct): todas cargan, sin errores en consola. Escalas elegidas como primera propuesta, pendientes de ajuste si no convencen.

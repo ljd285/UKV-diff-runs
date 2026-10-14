@@ -156,6 +156,40 @@ export const SEQUENTIAL = {
       "#f0f4fa"
     ]
   },
+  "nieve": {
+    "label": "Nieve",
+    "stops": [
+      "#cfe3f8",
+      "#8fb9e8",
+      "#4a86d6",
+      "#6a4fc4",
+      "#8e2a9e"
+    ],
+    "dark": [
+      "#2a3f5a",
+      "#4a86d6",
+      "#7fb0ee",
+      "#b79cf0",
+      "#f0b6f5"
+    ]
+  },
+  "visib": {
+    "label": "Visibilidad (poca = intenso)",
+    "stops": [
+      "#5b1a6b",
+      "#b3263e",
+      "#f08a2a",
+      "#f1e04a",
+      "#dcebd2"
+    ],
+    "dark": [
+      "#f0a6f0",
+      "#ff6a5a",
+      "#f2902f",
+      "#7a7a30",
+      "#262b31"
+    ]
+  },
   "radar": {
     "label": "Radar",
     "stops": [
