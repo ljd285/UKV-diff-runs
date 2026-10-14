@@ -19,6 +19,8 @@
 //                     Hasta +54 h hay un fichero por hora (`hourly`); de +57 a +120 h, uno por cada 3 h (`block`).
 //   minValue          Valor mínimo mostrado (en la unidad de los mapas): las celdas por debajo no se pintan ni cuentan en
 //                     las estadísticas; en la diferencia se omiten solo las celdas que están por debajo en ambas salidas.
+//   maxValue          Valor máximo mostrado (en la unidad de los mapas): las celdas por encima no se pintan (se ve el fondo);
+//                     solo afecta al dibujo, no a las estadísticas. En la diferencia se omiten si lo están en ambas salidas.
 //   static            true: no varía con la salida ni con el alcance (p. ej. el relieve). Se muestra solo en bruto,
 //                     sin comparación, y se lee siempre del alcance 0.
 //   range             Rango FIJO [min, max] de los mapas de cada salida, en la unidad mostrada (viewUnit para el viento).
@@ -45,6 +47,8 @@ export const GROUPS = [
   { id: "wind", label: "Viento a 10 m" },
   { id: "moist", label: "Humedad y nubes" },
   { id: "precip", label: "Precipitación" },
+  { id: "snow", label: "Nieve" },
+  { id: "vis", label: "Visibilidad y niebla" },
   { id: "terrain", label: "Terreno" },
 ];
 
@@ -55,6 +59,12 @@ const KELVIN = { factor: 1, offset: -273.15, unit: "°C", decimals: 1, diffScale
 const ACCUM = hours => ({
   group: "precip", leads: "std", accum: { hours, hourly: "precipitation_accumulation-PT01H", block: "precipitation_accumulation-PT03H" },
   unit: "mm", factor: 1000, offset: 0, decimals: 1, palette: { map: "radar", diff: "brbg" }, pos: "más lluvia", neg: "menos lluvia", minValue: 0.1,
+});
+
+// Acumulados de nieve (equivalente líquido, m → mm), mismos ficheros PT01H / PT03H que la precipitación.
+const SNOWACC = hours => ({
+  group: "snow", leads: "std", accum: { hours, hourly: "snowfall_accumulation-PT01H", block: "snowfall_accumulation-PT03H" },
+  unit: "mm", factor: 1000, offset: 0, decimals: 1, palette: { map: "nieve", diff: "brbg" }, pos: "más nieve", neg: "menos nieve", minValue: 0.1,
 });
 
 export const VARIABLES = {
@@ -76,7 +86,8 @@ export const VARIABLES = {
     pos: "más fuerte", neg: "más débil",
   },
   gust: {
-    label: "Racha de viento", group: "wind", file: "wind_gust_at_10m", leads: "std",
+    label: "Racha máxima del periodo (1 h; 3 h desde +57 h)", group: "wind", leads: "std", minLead: 1,
+    fileByLead: { hourly: "wind_gust_at_10m_max-PT01H", block: "wind_gust_at_10m_max-PT03H" }, // máximo de la hora (hasta +54 h) o de las 3 h previas
     unit: "mph", factor: 2.23694, offset: 0, decimals: 1, diffScale: 10, range: [0, 80], palette: { map: "plasma", diff: "prgn" }, minValue: 2, thresh: 10,
     pos: "más fuerte", neg: "más débil",
   },
@@ -118,6 +129,31 @@ export const VARIABLES = {
            filterPresets: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 10 mm", op: "gt", v: 10 }, { label: "> 20 mm", op: "gt", v: 20 }] },
   acc12: { ...ACCUM(12), label: "Acumulado de 12 h", diffScale: 15, range: [0, 60], thresh: 5,
            filterPresets: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 10 mm", op: "gt", v: 10 }, { label: "> 25 mm", op: "gt", v: 25 }, { label: "> 40 mm", op: "gt", v: 40 }] },
+  snow: {
+    label: "Nieve: tasa (equiv. líquido)", group: "snow", file: "snowfall_rate", leads: "std",
+    unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 4], palette: { map: "nieve", diff: "brbg" }, minValue: 0.05, thresh: 0.25,
+    pos: "más nieve", neg: "menos nieve",
+  },
+  snow3:  { ...SNOWACC(3),  label: "Nieve: acumulado de 3 h (equiv. líquido)",  diffScale: 3,  range: [0, 10], thresh: 1 },
+  snow6:  { ...SNOWACC(6),  label: "Nieve: acumulado de 6 h (equiv. líquido)",  diffScale: 5,  range: [0, 20], thresh: 2 },
+  snow12: { ...SNOWACC(12), label: "Nieve: acumulado de 12 h (equiv. líquido)", diffScale: 10, range: [0, 30], thresh: 5 },
+  snowline: {
+    label: "Cota de nieve (0 °C de bulbo húmedo)", group: "snow", file: "height_AGL_at_wet_bulb_freezing_level", leads: "std", addTerrain: true,
+    unit: "m", factor: 1, offset: 0, decimals: 0, diffScale: 200, range: [0, 1000], palette: { map: "frio-calor", diff: "azul-rojo" }, thresh: 200,
+    pos: "cota más alta", neg: "cota más baja",
+  },
+
+  vis: {
+    label: "Visibilidad", group: "vis", file: "visibility_at_screen_level", leads: "std",
+    unit: "km", factor: 0.001, offset: 0, decimals: 1, diffScale: 5, range: [0, 20], palette: { map: "visib", diff: "brbg" }, maxValue: 20, thresh: 2,
+    pos: "más visibilidad", neg: "menos visibilidad",
+  },
+  fog: {
+    label: "Probabilidad de niebla", group: "vis", file: "fog_fraction_at_screen_level", leads: "std",
+    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 25, range: [0, 100], palette: { map: "gris", diff: "prgn" }, minValue: 5, thresh: 25,
+    pos: "más niebla", neg: "menos niebla",
+  },
+
   precip: {
     label: "Tasa de precipitación (equiv. líquido)", group: "precip", file: "precipitation_rate", leads: "std",
     unit: "mm/h", factor: 3.6e6, offset: 0, decimals: 2, diffScale: 0.5, range: [0, 4], palette: { map: "radar", diff: "brbg" }, minValue: 0.1, thresh: 0.25,
@@ -162,6 +198,13 @@ const FILTER_PRESETS = {
   td:   [{ label: "< 0 °C", op: "lt", v: 0 }, { label: "> 16 °C (bochorno)", op: "gt", v: 16 }],
   pmsl: [{ label: "< 1000 hPa", op: "lt", v: 1000 }, { label: "< 990 hPa", op: "lt", v: 990 }, { label: "> 1025 hPa", op: "gt", v: 1025 }],
   wind: [{ label: "> 20 mph", op: "gt", v: 20 }, { label: "> 30 mph", op: "gt", v: 30 }, { label: "> 40 mph", op: "gt", v: 40 }],
+  snow: [{ label: "> 0,1 mm/h", op: "gt", v: 0.1 }, { label: "> 0,5 mm/h", op: "gt", v: 0.5 }, { label: "> 1 mm/h", op: "gt", v: 1 }],
+  snow3: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 3 mm", op: "gt", v: 3 }],
+  snow6: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 5 mm", op: "gt", v: 5 }],
+  snow12: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 5 mm", op: "gt", v: 5 }, { label: "> 10 mm", op: "gt", v: 10 }],
+  snowline: [{ label: "< 300 m", op: "lt", v: 300 }, { label: "< 600 m", op: "lt", v: 600 }, { label: "< 1000 m", op: "lt", v: 1000 }],
+  vis:  [{ label: "Niebla (< 1 km)", op: "lt", v: 1 }, { label: "< 5 km", op: "lt", v: 5 }, { label: "< 10 km", op: "lt", v: 10 }],
+  fog:  [{ label: "> 25 %", op: "gt", v: 25 }, { label: "> 50 %", op: "gt", v: 50 }],
   gust: [{ label: "> 40 mph", op: "gt", v: 40 }, { label: "> 50 mph", op: "gt", v: 50 }, { label: "> 60 mph", op: "gt", v: 60 }],
   wdir: [{ label: "Viento > 20 mph", op: "gt", v: 20 }, { label: "Viento > 30 mph", op: "gt", v: 30 }],
   wvec: [{ label: "Viento > 20 mph", op: "gt", v: 20 }, { label: "Viento > 30 mph", op: "gt", v: 30 }],
