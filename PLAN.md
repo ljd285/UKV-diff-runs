@@ -196,3 +196,8 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Barra de tiempo siempre visible** (sticky, fuera del panel): botón de plegar, ◀ ▶, etiqueta de alcance y deslizador. Funciona con el panel plegado y con la página desplazada. El aviso de estado/error es una superposición bajo la barra, así que ya no desplaza los mapas.
 - **Mapas más pequeños:** la altura se limita a la ventana (`--mapH = max(360px, 100vh − 290px)`) y el ancho sigue la proporción de la zona (`--ar`).
 - Medido en 1400×900: mapa lateral 445×610; 3 mapas 313×429; plegado 430×590; barra fija a y=8 tras desplazar 700 px; sin errores en consola. En pantallas ≤ 900 px el panel lateral pasa arriba.
+
+## Nueva escala de la nubosidad (14 oct)
+
+- Nubosidad total: mapa con la paleta **«Sol–nube»** (amarillo = despejado → gris → azul pizarra = cubierto; nueva en `docs/palettes.js`, con versión oscura propia) y diferencia **púrpura–naranja** (púrpura = más despejada, naranja = más nublada). Rango fijo 0…100 %, diferencia ±25 %, sin cambios.
+- Descartadas: viridis (la anterior; el amarillo vivo sobre el cielo cubierto era poco intuitivo), «Cielo» azul→blanco y Cividis.

@@ -25,6 +25,8 @@ SEQUENTIAL = {
                     dark=["#084081", "#2b8cbe", "#7bccc4", "#ccebc5", "#f7fcf0"]),
     "gris":    dict(label="Grises", stops=["#f5f5f5", "#bdbdbd", "#636363", "#1c1c1c"],
                     dark=["#1c1c1c", "#636363", "#bdbdbd", "#f5f5f5"]),
+    "sol-nube": dict(label="Sol–nube", stops=["#f7c531", "#efd98a", "#e6e2d3", "#a9b3c1", "#5d6b83", "#2b3650"],
+                    dark=["#a77f0c", "#8a7a45", "#6f7580", "#8e9bb0", "#c3cddd", "#f0f4fa"]),
     "radar":   dict(label="Radar", stops=["#eef2f6", "#a7dcae", "#4cb85a", "#f4e04d", "#f2902f", "#d8261d", "#a01a94"],
                     dark=["#262b31", "#3f7f4c", "#4cb85a", "#f4e04d", "#f2902f", "#ff5a4a", "#d36bd0"]),
     "relieve": dict(label="Relieve", stops=["#d7e8d4", "#9ccb86", "#e3d77a", "#c99a52", "#8c5e3c", "#f4f1ec"],

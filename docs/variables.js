@@ -108,7 +108,7 @@ export const VARIABLES = {
   },
   cloud: {
     label: "Nubosidad total", group: "moist", file: "cloud_amount_of_total_cloud", leads: "std",
-    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 25, range: [0, 100], palette: { map: "viridis", diff: "brbg" }, thresh: 25,
+    unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 25, range: [0, 100], palette: { map: "sol-nube", diff: "puor" }, thresh: 25,
     pos: "más nublada", neg: "más despejada",
   },
 
