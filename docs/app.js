@@ -3,6 +3,7 @@ import { makeLaea, makeConvergence } from "./laea.js";
 import { GROUPS, VARIABLES, DEFAULT_VARIABLE, validLeads, ARROWS, WIND_DIR_REFERENCE } from "./variables.js";
 import { REGION_GROUPS, REGIONS, DEFAULT_REGION } from "./regions.js";
 import { SEQUENTIAL, DIVERGING } from "./palettes.js";
+import { smoothField, contourLevels, buildContours } from "./contours.js";
 
 const BASE = "https://met-office-atmospheric-model-data.s3-eu-west-2.amazonaws.com/uk-deterministic-2km";
 const AVAILABLE_AFTER_H = 4.5; // el ciclo completo se termina de subir ~4 h 15 min después de su hora
@@ -214,7 +215,7 @@ function arrowField(grid, speed, dir, step) {
 const state = {
   cfg: null, layers: null, meta: null, token: 0,
   region: DEFAULT_REGION, shown: { a: true, b: false, diff: false },
-  images: {}, arrowCache: new Map(),
+  images: {}, arrowCache: new Map(), contourCache: {}, contours: false,
   filter: { op: "none", v1: NaN, v2: NaN }, // filtro de valores: se muestran solo las celdas que cumplen
   elev: { min: NaN, max: NaN },             // filtro de altitud del terreno: [min, max) en metros
   surface: "all",                           // filtro de superficie: "all" | "land" | "sea"
@@ -320,7 +321,7 @@ async function update() {
       : { a: { run: `salida ${shortStamp(c.tA)}`, fc: fcText(c.tA, c.lead) },
           b: needB ? { run: `salida ${shortStamp(c.tB)}`, fc: fcText(c.tB, c.leadB) } : null,
           diff: { run: "última − anterior", fc: `validez ${stampText(c.tA + c.lead * HOUR)}` } };
-    state.images = {}; state.arrowCache.clear();
+    state.images = {}; state.arrowCache.clear(); state.contourCache = {};
     drawAll();
     drawStats(c.cfg, state.layers);
     drawArrowKey();
@@ -495,6 +496,7 @@ function drawPanel(p) {
     if (p.kind !== "a" && L.rawB) drawArrows(ctx, "B", st.B, 1.8, crop, f, dpr, cssW);
     if (p.kind !== "b") drawArrows(ctx, "A", st.A, 1.6, crop, f, dpr, cssW);
   }
+  const contourNote = state.contours && cfg.contour ? drawContours(ctx, p, crop, f, dpr, ink, ring) : null;
   for (const [lon, lat] of CITIES) {
     const [x, y] = to(lon, lat);
     if (x < 0 || y < 0 || x > W || y > H) continue;
@@ -511,6 +513,55 @@ function drawPanel(p) {
     // línea reservada aunque no haya filtro: así activarlo o quitarlo no desplaza los mapas
     `<span class="flt">${flt ? `solo: ${flt}` : ""}</span>`;
   drawLegend(p, cfg, L, img);
+  if (contourNote) { const n = document.createElement("span"); n.className = "note"; n.textContent = contourNote; p.legend.append(n); }
+}
+
+// Isolíneas del campo de la salida mostrada (en la diferencia, las de la última salida). Se calculan una vez por campo
+// (suavizadas y a resolución de malla) y al dibujar solo se filtran por zona, altitud/superficie y valor.
+function contourData(src, cfg) {
+  if (state.contourCache[src]) return state.contourCache[src];
+  const L = state.layers, g = L.grid, { step } = cfg.contour;
+  const lo = Math.max(cfg.range[0], cfg.minValue ?? -Infinity), hi = Math.min(cfg.range[1], cfg.maxValue ?? Infinity);
+  const levels = contourLevels(lo, hi, step);
+  let data = L[src];
+  if (!cfg.static) for (let n = 0; n < (cfg.contour.smooth ?? 1); n++) data = smoothField(data, g.nx, g.ny);
+  return (state.contourCache[src] = { levels, segs: buildContours(data, g.nx, g.ny, levels, cfg.contour.minSegs), vals: L[src] });
+}
+
+function drawContours(ctx, p, crop, f, dpr, ink, ring) {
+  const L = state.layers, g = L.grid, cfg = state.cfg, { step, major } = cfg.contour;
+  const src = p.kind === "b" ? "b" : "a", cd = contourData(src, cfg);
+  const m = filterMatcher(), em = state.cellMask, other = p.kind === "diff" ? L.b : null;
+  const ok = k => (!em || em[k] === 1) && (!m || m(cd.vals[k]) || (other && m(other[k])));
+  const X = i => (i + 0.5 - crop.sx) * f, Y = j => (g.ny - 1 - j + 0.5 - crop.sy) * f;
+  const W = crop.sw * f, H = crop.sh * f, vd = cfg.viewDecimals ?? cfg.decimals, labels = [], majors = [];
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for (const [lev, a] of cd.segs) {
+    const isMajor = Math.abs(Math.round(lev / step) % major) === 0;
+    const path = new Path2D();
+    for (let q = 0; q < a.length; q += 5) {
+      if (!ok(a[q + 4])) continue;
+      const x1 = X(a[q]), y1 = Y(a[q + 1]), x2 = X(a[q + 2]), y2 = Y(a[q + 3]);
+      if ((x1 < 0 && x2 < 0) || (y1 < 0 && y2 < 0) || (x1 > W && x2 > W) || (y1 > H && y2 > H)) continue;
+      path.moveTo(x1, y1); path.lineTo(x2, y2);
+      if (isMajor && x1 > 24 * dpr && x1 < W - 24 * dpr && y1 > 12 * dpr && y1 < H - 12 * dpr) majors.push([lev, (x1 + x2) / 2, (y1 + y2) / 2]);
+    }
+    ctx.strokeStyle = ring; ctx.globalAlpha = 0.45; ctx.lineWidth = (isMajor ? 3.4 : 2.4) * dpr; ctx.stroke(path);
+    ctx.globalAlpha = 0.9; ctx.strokeStyle = `rgb(${ink})`; ctx.lineWidth = (isMajor ? 1.8 : 0.9) * dpr; ctx.stroke(path);
+  }
+  ctx.globalAlpha = 1;
+  // etiquetas de las líneas principales: separadas al menos ~150 px de pantalla entre sí
+  const gap = 150 * dpr;
+  ctx.font = `600 ${11 * dpr}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (let q = 0; q < majors.length; q++) {
+    const [lev, x, y] = majors[q];
+    if (labels.some(l => Math.hypot(l[0] - x, l[1] - y) < gap)) continue;
+    labels.push([x, y]);
+    const txt = String(Number(lev.toFixed(vd)));
+    ctx.lineWidth = 3.2 * dpr; ctx.strokeStyle = ring; ctx.strokeText(txt, x, y);
+    ctx.fillStyle = `rgb(${ink})`; ctx.fillText(txt, x, y);
+  }
+  return `Isolíneas cada ${step} ${cfg.viewUnit ?? cfg.unit}${p.kind === "diff" ? " (de la última salida)" : ""}`;
 }
 
 function drawArrows(ctx, which, color, width, crop, f, dpr, cssW) {
@@ -868,6 +919,15 @@ function init() {
   $("prev").onclick = () => nudge(-1);
   $("next").onclick = () => nudge(1);
 
+  try { state.contours = localStorage.getItem("ukv.contours") === "1"; } catch { /* sin almacenamiento */ }
+  const syncContours = () => $("contoursw").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", (b.dataset.c === "1") === state.contours));
+  syncContours();
+  $("contoursw").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.contours = b.dataset.c === "1"; syncContours();
+    try { localStorage.setItem("ukv.contours", state.contours ? "1" : "0"); } catch { /* idem */ }
+    drawAll();
+  });
   $("region").addEventListener("input", () => { state.region = $("region").value; drawAll(); });
   $("panels").addEventListener("click", e => {
     const b = e.target.closest("button");
