@@ -21,6 +21,8 @@
 //                     las estadísticas; en la diferencia se omiten solo las celdas que están por debajo en ambas salidas.
 //   maxValue          Valor máximo mostrado (en la unidad de los mapas): las celdas por encima no se pintan (se ve el fondo);
 //                     solo afecta al dibujo, no a las estadísticas. En la diferencia se omiten si lo están en ambas salidas.
+//   contour           {step, major, smooth?}: isolíneas cada `step` (en la unidad de los mapas), dentro del rango fijo; cada `major`-ésima
+//                     línea es más gruesa y lleva el valor escrito; `smooth` = pasadas de suavizado previas (por defecto 1); `minSegs` = se descartan las líneas con menos segmentos (ruido).
 //   static            true: no varía con la salida ni con el alcance (p. ej. el relieve). Se muestra solo en bruto,
 //                     sin comparación, y se lee siempre del alcance 0.
 //   range             Rango FIJO [min, max] de los mapas de cada salida, en la unidad mostrada (viewUnit para el viento).
@@ -214,3 +216,14 @@ const FILTER_PRESETS = {
   precip: [{ label: "> 0,1 mm/h", op: "gt", v: 0.1 }, { label: "> 1 mm/h", op: "gt", v: 1 }, { label: "> 4 mm/h (fuerte)", op: "gt", v: 4 }],
 };
 for (const [k, presets] of Object.entries(FILTER_PRESETS)) VARIABLES[k].filterPresets = presets;
+
+// Isolíneas (opcionales en el visor): equidistancia y cada cuántas líneas hay una principal con etiqueta.
+const CONTOURS = { // [equidistancia, cada cuántas una principal, pasadas de suavizado, segmentos mínimos de una línea]
+  t: [2, 5], tmax: [2, 5], tmin: [2, 5], td: [2, 5], pmsl: [4, 5],
+  wind: [5, 4, 2], gust: [10, 5, 2], wdir: [5, 4, 2], wvec: [5, 4, 2],
+  orog: [100, 5], rh: [10, 5, 2], cloud: [25, 2, 3], precip: [1, 2, 2],
+  acc3: [2, 5, 2], acc6: [5, 2, 2], acc12: [10, 2, 2],
+  snow: [1, 2, 2], snow3: [2, 5, 2], snow6: [5, 2, 2], snow12: [5, 2, 2], snowline: [100, 5, 8, 40],
+  vis: [5, 2, 3], fog: [25, 2, 3],
+};
+for (const [k, [step, major, smooth = 1, minSegs = 15]] of Object.entries(CONTOURS)) VARIABLES[k].contour = { step, major, smooth, minSegs };

@@ -215,3 +215,10 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Tasa de nieve:** rango 0…4 mm/h.
 - **Visibilidad:** las celdas por encima de 20 km no se pintan (se ve el fondo). Nuevo campo `maxValue` (análogo a `minValue`): solo afecta al dibujo, no a las estadísticas; en la diferencia se omite una celda si está por encima en las dos salidas; la leyenda lo indica.
 - Probado con la salida 15Z del 5 ene 2026 (fría: mediana de la cota 215 m).
+
+## Isolíneas (14 oct)
+
+- Interruptor **Isolíneas No/Sí** en el panel (se recuerda en `localStorage`), disponible en **todas las variables**. Se dibujan sobre cada mapa; en la diferencia, las de la **última salida**. Respetan los filtros de valor, superficie y altitud.
+- **Cálculo** en el navegador (`docs/contours.js`): *marching squares* sobre la malla completa, una vez por campo y salida (caché que se reinicia al cambiar de variable, alcance o salida; al hacer zoom o cambiar de zona solo se vuelve a dibujar). Antes se suaviza el campo con un filtro [1 2 1] (`smooth` pasadas) y se descartan las líneas formadas por menos de `minSegs` segmentos conectados (bucles de ruido).
+- **Niveles** = múltiplos de `step` dentro del rango fijo del mapa (y por encima de `minValue` / por debajo de `maxValue`); una de cada `major` es principal (más gruesa y con el valor escrito, etiquetas separadas ≥ 150 px). Tabla `CONTOURS` al final de `docs/variables.js`: T 2 °C (principal cada 10), presión 4 hPa (cada 20), viento 5 mph, racha 10 mph, HR 10 %, nubosidad 25 %, lluvia 1 mm/h, acumulados 2/5/10 mm, nieve 1 mm/h y 2/5/5 mm, **cota de nieve 100 m** (principal cada 500), visibilidad 5 km, niebla 25 %, relieve 100 m.
+- Leyenda: «Isolíneas cada N unidad». Probado en Chromium (cota de nieve, T, presión, viento; mapa, anterior y diferencia, con zoom a Highlands), sin errores.
