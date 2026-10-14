@@ -137,6 +137,25 @@ export const SEQUENTIAL = {
       "#f5f5f5"
     ]
   },
+  "sol-nube": {
+    "label": "Sol–nube",
+    "stops": [
+      "#f7c531",
+      "#efd98a",
+      "#e6e2d3",
+      "#a9b3c1",
+      "#5d6b83",
+      "#2b3650"
+    ],
+    "dark": [
+      "#a77f0c",
+      "#8a7a45",
+      "#6f7580",
+      "#8e9bb0",
+      "#c3cddd",
+      "#f0f4fa"
+    ]
+  },
   "radar": {
     "label": "Radar",
     "stops": [
