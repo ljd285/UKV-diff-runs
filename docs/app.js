@@ -336,8 +336,6 @@ function buildPanels() {
   const kinds = ["a", "b", "diff"].filter(k => state.shown[k]);
   const maps = $("maps");
   maps.style.setProperty("--cols", kinds.length);
-  maps.style.maxWidth = kinds.length === 1 ? "860px" : "";
-  maps.style.margin = kinds.length === 1 ? "0 auto" : "";
   maps.innerHTML = "";
   panels = kinds.map(kind => {
     const fig = document.createElement("figure");
@@ -469,6 +467,7 @@ function drawPanel(p) {
   const cssW = p.canvas.clientWidth || 320, dpr = Math.min(window.devicePixelRatio || 1, 2);
   const W = Math.round(cssW * dpr), H = Math.round(W * crop.sh / crop.sw);
   p.canvas.style.aspectRatio = `${crop.sw} / ${crop.sh}`;
+  $("maps").style.setProperty("--ar", crop.sw / crop.sh); // el CSS limita el ancho para que el mapa no pase de --mapH de alto
   if (p.canvas.width !== W || p.canvas.height !== H) { p.canvas.width = W; p.canvas.height = H; }
   const ctx = p.canvas.getContext("2d");
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
@@ -799,6 +798,26 @@ function initElev() {
   });
 }
 
+// ---------- Disposición: panel lateral o superior, plegable ----------
+function initLayout() {
+  const store = {
+    get: k => { try { return localStorage.getItem(k); } catch { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento: no se recuerda */ } },
+  };
+  const app = $("app");
+  let layout = store.get("ukv.layout") === "top" ? "top" : "side", collapsed = store.get("ukv.collapsed") === "1";
+  const apply = () => {
+    app.className = layout + (collapsed ? " collapsed" : "");
+    $("layoutsw").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.l === layout));
+    $("toggleCtl").setAttribute("aria-expanded", !collapsed);
+    $("toggleCtl").textContent = collapsed ? "☰ Mostrar ajustes" : "✕ Ocultar ajustes";
+    store.set("ukv.layout", layout); store.set("ukv.collapsed", collapsed ? "1" : "0");
+  };
+  $("layoutsw").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { layout = b.dataset.l; apply(); } });
+  $("toggleCtl").addEventListener("click", () => { collapsed = !collapsed; apply(); });
+  apply(); // al cambiar el tamaño de #maps, el ResizeObserver repinta los mapas
+}
+
 // ---------- Eventos ----------
 function init() {
   const t = defaultCycle(), d = new Date(t);
@@ -816,6 +835,7 @@ function init() {
   refreshLeads(24);
   buildPanels();
   syncFilterUI(); initFilter(); initElev();
+  initLayout();
 
   $("variable").addEventListener("input", () => {
     const wasStatic = state.cfg?.static, st = isStatic();

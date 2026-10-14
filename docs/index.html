@@ -13,10 +13,12 @@
     :root { --bg:#14171b; --card:#1d2126; --ink:#e6e9ed; --muted:#98a2ad; --line:#333a42; --accent:#6da7ec; --surface:#1a1a19; }
   }
   * { box-sizing:border-box; }
-  body { margin:0; padding:16px; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,sans-serif; }
-  main { max-width:1400px; margin:0 auto; }
-  h1 { font-size:1.25rem; margin:0 0 4px; }
-  .sub { color:var(--muted); margin:0 0 14px; }
+  body { margin:0; padding:12px 16px; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,sans-serif; }
+  main { max-width:1900px; margin:0 auto; }
+  header.top { display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  h1 { font-size:1.15rem; margin:0; }
+  .sub { color:var(--muted); margin:2px 0 0; font-size:.85rem; }
+  .layoutsw { display:flex; align-items:center; gap:8px; font-size:.8rem; color:var(--muted); }
   .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:12px; }
   .row { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
   .row + .row { margin-top:12px; }
@@ -43,9 +45,40 @@
   .info { font-size:.85rem; color:var(--muted); margin-top:10px; }
   .info b { color:var(--ink); }
   /* Espacio reservado: ni la línea de validez ni los errores desplazan el mapa. */
-  #info, #status { min-height:1.4em; }
-  #status.err { color:#d1242f; }
+  #info { min-height:1.4em; }
+  /* Los avisos (p. ej. "No disponible") se superponen justo bajo la barra de tiempo: no desplazan los mapas. */
+  #timebar #status { position:absolute; top:calc(100% + 6px); left:0; right:0; margin:0; z-index:4; }
+  #timebar #status:empty { display:none; }
+  #timebar #status.err { background:var(--card); color:#d1242f; border:1px solid #d1242f; border-radius:6px; padding:6px 10px; box-shadow:0 2px 10px #0003; }
 
+  /* ---- Disposición: panel de ajustes (lateral o superior, plegable) + barra de tiempo siempre visible + mapas ---- */
+  #app { display:grid; gap:12px; align-items:start; }
+  #app.side { grid-template-columns:340px minmax(0,1fr); }
+  #app.top, #app.collapsed { grid-template-columns:minmax(0,1fr); }
+  #app.collapsed #controls { display:none; }
+  #controls, #timebar { margin:0; }
+  #app.side #controls { position:sticky; top:12px; max-height:calc(100vh - 24px); overflow:auto; }
+  #app.side .row > label { flex:1 1 100%; }
+  #app.side .row > label select { width:100%; }
+  #app.side .seg { display:flex; width:100%; }
+  #app.side .seg button { flex:1; padding-inline:4px; }
+  #app.side .fctl select { flex:1 1 0; min-width:0; }
+  #app.side #elevRow .fctl { flex-wrap:nowrap; }
+  #app.side #filterRow .fctl select { flex:1 1 100%; }
+  #app.side #filterRow .fctl input[type=number] { flex:1 1 60px; width:auto; min-width:0; }
+  #content > * + * { margin-top:12px; }
+  #timebar { position:sticky; top:8px; z-index:4; display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center; box-shadow:0 2px 10px #0002; padding:8px 12px; }
+  #timebar button { min-width:2.4em; }
+  #timebar .lead { flex:1 1 260px; display:flex; flex-direction:column; gap:3px; }
+  #timebar .lead b { color:var(--ink); }
+  #timebar input[type=range] { width:100%; }
+  @media (max-width:900px) {
+    #app.side { grid-template-columns:minmax(0,1fr); }
+    #app.side #controls { position:static; max-height:none; }
+  }
+  /* Tamaño de los mapas: nunca más altos que la ventana (--mapH); el ancho sale de la proporción de la zona (--ar). */
+  #maps { --mapH:max(360px, calc(100vh - 290px)); }
+  #maps figure.map { width:100%; max-width:calc(var(--mapH) * var(--ar, .8) + 18px); margin-inline:auto; }
   #maps { display:grid; grid-template-columns:repeat(var(--cols,1), minmax(0,1fr)); gap:12px; transition:opacity .15s; }
   #maps.loading { opacity:.55; cursor:progress; }
   @media (max-width:820px) { #maps { grid-template-columns:minmax(0,1fr); } }
@@ -74,87 +107,104 @@
 </head>
 <body>
 <main>
-  <h1>Visor de datos UKV</h1>
-  <p class="sub">Salidas del modelo Met Office UKV 2 km (datos abiertos en AWS). Muestra los datos de una salida y, si quieres, los compara con una salida anterior para la misma hora de validez.</p>
+  <header class="top">
+    <div>
+      <h1>Visor de datos UKV</h1>
+      <p class="sub">Salidas del modelo Met Office UKV 2 km (datos abiertos en AWS). Muestra los datos de una salida y, si quieres, los compara con una salida anterior para la misma hora de validez.</p>
+    </div>
+    <div class="layoutsw">Disposición
+      <span class="seg" id="layoutsw" role="group" aria-label="Disposición del panel de ajustes">
+        <button data-l="side" aria-pressed="true">Panel a la izquierda</button>
+        <button data-l="top" aria-pressed="false">Panel arriba</button>
+      </span>
+    </div>
+  </header>
 
-  <div class="panel">
-    <div class="row">
-      <label>Variable
-        <select id="variable"></select>
-      </label>
-      <label>Última salida
-        <span style="display:flex;gap:6px">
-          <input type="date" id="date">
-          <select id="run"><option value="03">03Z</option><option value="15">15Z</option></select>
-        </span>
-      </label>
-      <label>Comparar con
-        <select id="offset">
-          <option value="12">Salida anterior (−12 h)</option>
-          <option value="24">Misma salida, 1 día antes (−24 h)</option>
-          <option value="36">−36 h</option>
-          <option value="48">−48 h</option>
-        </select>
-      </label>
-      <label>Zona
-        <select id="region"></select>
-      </label>
-      <label>Mapas
-        <span class="seg" id="panels" role="group" aria-label="Mapas a mostrar">
-          <button data-k="a" aria-pressed="true">Última salida</button>
-          <button data-k="b" aria-pressed="false">Salida anterior</button>
-          <button data-k="diff" aria-pressed="false">Diferencia</button>
-        </span>
-      </label>
-    </div>
-    <div class="row">
-      <label>Alcance de la última salida: <b id="leadLabel"></b>
-        <input type="range" id="lead" min="0" max="0" value="0">
-      </label>
-      <button id="prev" aria-label="Alcance anterior">◀</button>
-      <button id="next" aria-label="Alcance siguiente">▶</button>
-    </div>
-    <div class="row" id="filterRow">
-      <label>Filtro de valores
-        <span class="fctl">
-          <select id="fop" aria-label="Tipo de filtro">
-            <option value="none">Sin filtro</option>
-            <option value="lt">Menor que</option>
-            <option value="gt">Mayor que</option>
-            <option value="between">Entre</option>
+  <div id="app" class="side">
+    <aside id="controls" class="panel" aria-label="Ajustes">
+      <div class="row">
+        <label>Variable
+          <select id="variable"></select>
+        </label>
+        <label>Última salida
+          <span style="display:flex;gap:6px">
+            <input type="date" id="date">
+            <select id="run"><option value="03">03Z</option><option value="15">15Z</option></select>
+          </span>
+        </label>
+        <label>Comparar con
+          <select id="offset">
+            <option value="12">Salida anterior (−12 h)</option>
+            <option value="24">Misma salida, 1 día antes (−24 h)</option>
+            <option value="36">−36 h</option>
+            <option value="48">−48 h</option>
           </select>
-          <input type="number" id="fv1" step="any" aria-label="Valor del filtro" disabled>
-          <input type="number" id="fv2" step="any" aria-label="Segundo valor del filtro" disabled>
-          <span id="funit"></span>
-        </span>
-      </label>
-      <span id="fpresets" class="presets" role="group" aria-label="Atajos del filtro"></span>
-    </div>
-    <div class="row" id="elevRow">
-      <label>Superficie
-        <select id="surf" aria-label="Filtro de superficie">
-          <option value="all">Tierra y mar</option>
-          <option value="land">Solo tierra</option>
-          <option value="sea">Solo mar</option>
-        </select>
-      </label>
-      <label>Altitud del terreno
-        <span class="fctl">
-          <select id="emin" aria-label="Altitud mínima del terreno" title="Desde (incluida)"></select>
-          <span class="sep">a</span>
-          <select id="emax" aria-label="Altitud máxima del terreno" title="Hasta (sin incluir)"></select>
-          <span id="eunit">m</span>
-        </span>
-      </label>
-      <span id="epresets" class="presets" role="group" aria-label="Atajos de altitud"></span>
-    </div>
-    <div class="info" id="info"></div>
-    <div class="info" id="status" role="status"></div>
-  </div>
+        </label>
+        <label>Zona
+          <select id="region"></select>
+        </label>
+        <label>Mapas
+          <span class="seg" id="panels" role="group" aria-label="Mapas a mostrar">
+            <button data-k="a" aria-pressed="true">Última salida</button>
+            <button data-k="b" aria-pressed="false">Salida anterior</button>
+            <button data-k="diff" aria-pressed="false">Diferencia</button>
+          </span>
+        </label>
+      </div>
+      <div class="row" id="filterRow">
+        <label>Filtro de valores
+          <span class="fctl">
+            <select id="fop" aria-label="Tipo de filtro">
+              <option value="none">Sin filtro</option>
+              <option value="lt">Menor que</option>
+              <option value="gt">Mayor que</option>
+              <option value="between">Entre</option>
+            </select>
+            <input type="number" id="fv1" step="any" aria-label="Valor del filtro" disabled>
+            <input type="number" id="fv2" step="any" aria-label="Segundo valor del filtro" disabled>
+            <span id="funit"></span>
+          </span>
+        </label>
+        <span id="fpresets" class="presets" role="group" aria-label="Atajos del filtro"></span>
+      </div>
+      <div class="row" id="elevRow">
+        <label>Superficie
+          <select id="surf" aria-label="Filtro de superficie">
+            <option value="all">Tierra y mar</option>
+            <option value="land">Solo tierra</option>
+            <option value="sea">Solo mar</option>
+          </select>
+        </label>
+        <label>Altitud del terreno
+          <span class="fctl">
+            <select id="emin" aria-label="Altitud mínima del terreno" title="Desde (incluida)"></select>
+            <span class="sep">a</span>
+            <select id="emax" aria-label="Altitud máxima del terreno" title="Hasta (sin incluir)"></select>
+            <span id="eunit">m</span>
+          </span>
+        </label>
+        <span id="epresets" class="presets" role="group" aria-label="Atajos de altitud"></span>
+      </div>
+      <div class="info" id="info"></div>
+    </aside>
 
-  <div id="maps" aria-live="polite"></div>
-  <div id="arrowkey"></div>
-  <div class="stats" id="stats"></div>
+    <section id="content">
+      <!-- Barra de tiempo: fuera del panel plegable y siempre visible (al desplazarse queda fija arriba) -->
+      <div id="timebar" class="panel" role="group" aria-label="Alcance del pronóstico">
+        <button id="toggleCtl" aria-expanded="true" aria-controls="controls"></button>
+        <button id="prev" aria-label="Alcance anterior">◀</button>
+        <button id="next" aria-label="Alcance siguiente">▶</button>
+        <label class="lead">
+          <span>Alcance de la última salida: <b id="leadLabel"></b></span>
+          <input type="range" id="lead" min="0" max="0" value="0">
+        </label>
+        <div class="info" id="status" role="status"></div>
+      </div>
+      <div id="maps" aria-live="polite"></div>
+      <div id="arrowkey"></div>
+      <div class="stats" id="stats"></div>
+    </section>
+  </div>
 
   <p class="foot">Diferencia = última salida − salida anterior (rojo: la última más cálida, azul: más fría). Malla del modelo en proyección Lambert azimutal; los puntos son referencias de ciudades.
   Datos: Met Office, CC BY-SA 4.0, sin garantía. Costa: Natural Earth. <a href="images.html">Visor de imágenes de TWO</a>.</p>
