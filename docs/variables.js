@@ -69,6 +69,12 @@ const SNOWACC = hours => ({
   unit: "mm", factor: 1000, offset: 0, decimals: 1, palette: { map: "nieve", diff: "brbg" }, pos: "más nieve", neg: "menos nieve", minValue: 0.1,
 });
 
+// Nubosidad por capas (baja / media / alta): mismas unidad, escalas y paleta que la nubosidad total.
+const CLOUD_BASE = {
+  group: "moist", leads: "std", unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 25, range: [0, 100],
+  palette: { map: "sol-nube", diff: "puor" }, thresh: 25, pos: "más nublada", neg: "más despejada",
+};
+
 export const VARIABLES = {
   t:    { ...KELVIN, label: "Temperatura a 1,5 m", group: "temp", file: "temperature_at_screen_level", leads: "any" },
   tmax: { ...KELVIN, label: "Temperatura máxima (última hora)", group: "temp", file: "temperature_at_screen_level_max-PT01H", leads: "any", minLead: 1, range: [-5, 35] },
@@ -124,6 +130,10 @@ export const VARIABLES = {
     unit: "%", factor: 100, offset: 0, decimals: 0, diffScale: 25, range: [0, 100], palette: { map: "sol-nube", diff: "puor" }, thresh: 25,
     pos: "más nublada", neg: "más despejada",
   },
+
+  cloudlow:  { ...CLOUD_BASE, label: "Nubosidad baja",  file: "cloud_amount_of_low_cloud" },
+  cloudmid:  { ...CLOUD_BASE, label: "Nubosidad media", file: "cloud_amount_of_medium_cloud" },
+  cloudhigh: { ...CLOUD_BASE, label: "Nubosidad alta",  file: "cloud_amount_of_high_cloud" },
 
   acc3:  { ...ACCUM(3),  label: "Acumulado de 3 h",  diffScale: 5,  range: [0, 20], thresh: 2,
            filterPresets: [{ label: "> 1 mm", op: "gt", v: 1 }, { label: "> 5 mm", op: "gt", v: 5 }, { label: "> 10 mm", op: "gt", v: 10 }] },
@@ -211,6 +221,9 @@ const FILTER_PRESETS = {
   wdir: [{ label: "Viento > 20 mph", op: "gt", v: 20 }, { label: "Viento > 30 mph", op: "gt", v: 30 }],
   wvec: [{ label: "Viento > 20 mph", op: "gt", v: 20 }, { label: "Viento > 30 mph", op: "gt", v: 30 }],
   rh:   [{ label: "< 40 %", op: "lt", v: 40 }, { label: "> 90 %", op: "gt", v: 90 }, { label: "> 95 %", op: "gt", v: 95 }],
+  cloudlow: [{ label: "Despejado (< 20 %)", op: "lt", v: 20 }, { label: "Cubierto (> 80 %)", op: "gt", v: 80 }],
+  cloudmid: [{ label: "Despejado (< 20 %)", op: "lt", v: 20 }, { label: "Cubierto (> 80 %)", op: "gt", v: 80 }],
+  cloudhigh: [{ label: "Despejado (< 20 %)", op: "lt", v: 20 }, { label: "Cubierto (> 80 %)", op: "gt", v: 80 }],
   cloud:[{ label: "Despejado (< 20 %)", op: "lt", v: 20 }, { label: "Cubierto (> 80 %)", op: "gt", v: 80 }],
   orog: [{ label: "> 100 m", op: "gt", v: 100 }, { label: "> 300 m", op: "gt", v: 300 }, { label: "> 600 m", op: "gt", v: 600 }, { label: "> 900 m", op: "gt", v: 900 }],
   precip: [{ label: "> 0,1 mm/h", op: "gt", v: 0.1 }, { label: "> 1 mm/h", op: "gt", v: 1 }, { label: "> 4 mm/h (fuerte)", op: "gt", v: 4 }],
@@ -221,7 +234,7 @@ for (const [k, presets] of Object.entries(FILTER_PRESETS)) VARIABLES[k].filterPr
 const CONTOURS = { // [equidistancia, cada cuántas una principal, pasadas de suavizado, segmentos mínimos de una línea]
   t: [2, 5], tmax: [2, 5], tmin: [2, 5], td: [2, 5], pmsl: [4, 5],
   wind: [5, 4, 2], gust: [10, 5, 2], wdir: [5, 4, 2], wvec: [5, 4, 2],
-  orog: [100, 5], rh: [10, 5, 2], cloud: [25, 2, 3], precip: [1, 2, 2],
+  orog: [100, 5], rh: [10, 5, 2], cloud: [25, 2, 3], cloudlow: [25, 2, 3], cloudmid: [25, 2, 3], cloudhigh: [25, 2, 3], precip: [1, 2, 2],
   acc3: [2, 5, 2], acc6: [5, 2, 2], acc12: [10, 2, 2],
   snow: [1, 2, 2], snow3: [2, 5, 2], snow6: [5, 2, 2], snow12: [5, 2, 2], snowline: [100, 5, 8, 40],
   vis: [5, 2, 3], fog: [25, 2, 3],

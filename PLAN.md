@@ -222,3 +222,8 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Cálculo** en el navegador (`docs/contours.js`): *marching squares* sobre la malla completa, una vez por campo y salida (caché que se reinicia al cambiar de variable, alcance o salida; al hacer zoom o cambiar de zona solo se vuelve a dibujar). Antes se suaviza el campo con un filtro [1 2 1] (`smooth` pasadas) y se descartan las líneas formadas por menos de `minSegs` segmentos conectados (bucles de ruido).
 - **Niveles** = múltiplos de `step` dentro del rango fijo del mapa (y por encima de `minValue` / por debajo de `maxValue`); una de cada `major` es principal (más gruesa y con el valor escrito, etiquetas separadas ≥ 150 px). Tabla `CONTOURS` al final de `docs/variables.js`: T 2 °C (principal cada 10), presión 4 hPa (cada 20), viento 5 mph, racha 10 mph, HR 10 %, nubosidad 25 %, lluvia 1 mm/h, acumulados 2/5/10 mm, nieve 1 mm/h y 2/5/5 mm, **cota de nieve 100 m** (principal cada 500), visibilidad 5 km, niebla 25 %, relieve 100 m.
 - Leyenda: «Isolíneas cada N unidad». Probado en Chromium (cota de nieve, T, presión, viento; mapa, anterior y diferencia, con zoom a Highlands), sin errores.
+
+## Nubosidad por capas (16 oct)
+
+- Tres variables nuevas en «Humedad y nubes»: **Nubosidad baja, media y alta** (`cloud_amount_of_low/medium/high_cloud`, fracción 0–1 → %). Mismas escala fija (0…100 %), diferencia (±25 %), paleta «Sol–nube» + púrpura–naranja, atajos de filtro (< 20 %, > 80 %) e isolíneas (cada 25 %) que la nubosidad total, con base común `CLOUD_BASE` en `docs/variables.js`. Alcances: los habituales (cada hora hasta +54 h y cada 3 h hasta +120 h).
+- Probado en Chromium con la salida 15Z del 5 ene 2026; sin errores.
