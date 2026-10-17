@@ -1,5 +1,5 @@
 import h5wasm from "./vendor/h5wasm/hdf5_hl.js";
-import { makeLaea, makeConvergence } from "./laea.js";
+import { makeLaea, makeLaeaInverse, makeConvergence } from "./laea.js";
 import { GROUPS, VARIABLES, DEFAULT_VARIABLE, validLeads, ARROWS, WIND_DIR_REFERENCE } from "./variables.js";
 import { REGION_GROUPS, REGIONS, DEFAULT_REGION } from "./regions.js";
 import { SEQUENTIAL, DIVERGING } from "./palettes.js";
@@ -23,6 +23,7 @@ const CITIES = [
 const $ = id => document.getElementById(id);
 const pad = (n, w = 2) => String(n).padStart(w, "0");
 // Número con signo explícito; un valor que se redondea a cero no lleva signo (evita "-0.0").
+const fixed = (v, dec) => { const t = v.toFixed(dec); return Number(t) === 0 ? t.replace("-", "") : t; }; // sin «-0.0»
 const signed = (v, dec) => { const t = v.toFixed(dec); return Number(t) === 0 ? t.replace("-", "") : v > 0 ? `+${t}` : t; };
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 
@@ -221,6 +222,7 @@ const state = {
   cfg: null, layers: null, meta: null, token: 0,
   region: DEFAULT_REGION, shown: { a: true, b: false, diff: false },
   images: {}, arrowCache: new Map(), contourCache: {}, contours: false,
+  marks: "none", scope: "view", marksCache: {}, scopeMaskCache: null, // valores sobre el mapa y ámbito de estadísticas/marcas
   filter: { op: "none", v1: NaN, v2: NaN }, // filtro de valores: se muestran solo las celdas que cumplen
   elev: { min: NaN, max: NaN },             // filtro de altitud del terreno: [min, max) en metros
   surface: "all",                           // filtro de superficie: "all" | "land" | "sea"
@@ -328,7 +330,7 @@ async function update() {
       : { a: { run: `salida ${shortStamp(c.tA)}`, fc: fcText(c.tA, c.lead) },
           b: needB ? { run: `salida ${shortStamp(c.tB)}`, fc: fcText(c.tB, c.leadB) } : null,
           diff: { run: "última − anterior", fc: `validez ${stampText(c.tA + c.lead * HOUR)}` } };
-    state.images = {}; state.arrowCache.clear(); state.contourCache = {};
+    state.images = {}; state.arrowCache.clear(); state.contourCache = {}; state.marksCache = {}; state.scopeMaskCache = null;
     drawAll();
     drawStats(c.cfg, state.layers);
     drawArrowKey();
@@ -405,8 +407,8 @@ const toImagePx = (g, lon, lat) => {
 };
 
 // Recorte (en píxeles de la imagen) de la zona elegida.
-function getCrop(g) {
-  const reg = REGIONS[state.region];
+function getCrop(g, regionId = state.region) {
+  const reg = REGIONS[regionId];
   if (!reg.box) return { sx: 0, sy: 0, sw: g.nx, sh: g.ny };
   const [w, s, e, n] = reg.box;
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
@@ -504,6 +506,7 @@ function drawPanel(p) {
     if (p.kind !== "b") drawArrows(ctx, "A", st.A, 1.6, crop, f, dpr, cssW);
   }
   const contourNote = state.contours && cfg.contour ? drawContours(ctx, p, crop, f, dpr, ink, ring) : null;
+  const marksNote = state.marks !== "none" ? drawMarks(ctx, p, crop, f, dpr, cssW, ink, ring) : null;
   for (const [lon, lat] of CITIES) {
     const [x, y] = to(lon, lat);
     if (x < 0 || y < 0 || x > W || y > H) continue;
@@ -520,7 +523,7 @@ function drawPanel(p) {
     // línea reservada aunque no haya filtro: así activarlo o quitarlo no desplaza los mapas
     `<span class="flt">${flt ? `solo: ${flt}` : ""}</span>`;
   drawLegend(p, cfg, L, img);
-  if (contourNote) { const n = document.createElement("span"); n.className = "note"; n.textContent = contourNote; p.legend.append(n); }
+  for (const t of [contourNote, marksNote]) if (t) { const n = document.createElement("span"); n.className = "note"; n.textContent = t; p.legend.append(n); }
 }
 
 // Isolíneas del campo de la salida mostrada (en la diferencia, las de la última salida). Se calculan una vez por campo
@@ -569,6 +572,110 @@ function drawContours(ctx, p, crop, f, dpr, ink, ring) {
     ctx.fillStyle = `rgb(${ink})`; ctx.fillText(txt, x, y);
   }
   return `Isolíneas cada ${step} ${cfg.viewUnit ?? cfg.unit}${p.kind === "diff" ? " (de la última salida)" : ""}`;
+}
+
+// ---------- Ámbito (estadísticas y marcas) ----------
+const SCOPES = { view: "Zona visible", uk: "Reino Unido e Irlanda", grid: "Dominio completo del modelo" };
+const scopeLabel = () => state.scope === "view" ? `zona visible (${REGIONS[state.region].label})` : SCOPES[state.scope];
+// Máscara 0/1 de las celdas del ámbito (null = todo el dominio) y su nº de celdas.
+function scopeMask() {
+  const g = state.layers.grid, regionId = state.scope === "view" ? state.region : state.scope === "uk" ? "uk" : "grid";
+  const key = regionId + "|" + g.nx;
+  if (state.scopeMaskCache?.key === key) return state.scopeMaskCache;
+  let mask = null, count = g.nx * g.ny;
+  if (REGIONS[regionId].box) {
+    const c = getCrop(g, regionId);
+    mask = new Uint8Array(g.nx * g.ny); count = 0;
+    for (let j = 0; j < g.ny; j++) {
+      const y = g.ny - 1 - j + 0.5;
+      if (y < c.sy || y >= c.sy + c.sh) continue;
+      for (let i = 0; i < g.nx; i++) { const x = i + 0.5; if (x >= c.sx && x < c.sx + c.sw) { mask[j * g.nx + i] = 1; count++; } }
+    }
+  }
+  return (state.scopeMaskCache = { key, mask, count });
+}
+const inverseLaea = makeLaeaInverse();
+function cellLonLat(g, k) {
+  const [lon, lat] = inverseLaea(g.x0 + (k % g.nx) * g.dx, g.y0 + Math.floor(k / g.nx) * g.dy);
+  return `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"} ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "O"}`;
+}
+
+// ¿Se pinta (y cuenta para las marcas) la celda k del mapa `kind`? Misma regla que el dibujo, más el ámbito.
+function markOk(kind, L, cfg, sc, m, em) {
+  const vals = kind === "a" ? L.a : kind === "b" ? L.b : L.diff, mv = cfg.minValue ?? null, xv = cfg.maxValue ?? null;
+  return k => {
+    const v = vals[k];
+    if (!Number.isFinite(v) || (sc && !sc[k]) || (em && !em[k])) return false;
+    if (kind === "diff") {
+      if (mv != null && L.a[k] < mv && L.b[k] < mv) return false;
+      if (xv != null && L.a[k] > xv && L.b[k] > xv) return false;
+      return !m || m(L.a[k]) || m(L.b[k]);
+    }
+    if ((mv != null && v < mv) || (xv != null && v > xv)) return false;
+    return !m || m(v);
+  };
+}
+
+// Los n mayores (dir 1) o menores (dir −1) valores, separados al menos `R` celdas entre sí.
+function findPeaks(vals, ok, g, n, dir, R) {
+  const cand = [];
+  for (let k = 0; k < vals.length; k++) if (ok(k)) cand.push(k);
+  const ex = new Uint8Array(vals.length), out = [];
+  for (let q = 0; q < n; q++) {
+    let best = -1, bv = -Infinity;
+    for (const k of cand) { if (!ex[k] && vals[k] * dir > bv) { bv = vals[k] * dir; best = k; } }
+    if (best < 0) break;
+    out.push({ k: best, v: vals[best], dir });
+    const bi = best % g.nx, bj = Math.floor(best / g.nx);
+    for (let j = Math.max(0, bj - R); j <= Math.min(g.ny - 1, bj + R); j++) for (let i = Math.max(0, bi - R); i <= Math.min(g.nx - 1, bi + R); i++) ex[j * g.nx + i] = 1;
+  }
+  return out;
+}
+
+// Marcas de valores sobre el mapa: máximo y mínimo, picos del filtro o rejilla de números.
+function drawMarks(ctx, p, crop, f, dpr, cssW, ink, ring) {
+  const L = state.layers, g = L.grid, cfg = state.cfg, kind = p.kind;
+  const vals = kind === "a" ? L.a : kind === "b" ? L.b : L.diff;
+  const m = filterMatcher(), em = state.cellMask, { mask: sc } = scopeMask(), ok = markOk(kind, L, cfg, sc, m, em);
+  const X = i => (i + 0.5 - crop.sx) * f, Y = j => (g.ny - 1 - j + 0.5 - crop.sy) * f, W = crop.sw * f, H = crop.sh * f;
+  const vd = kind === "diff" ? cfg.decimals + 1 : (cfg.viewDecimals ?? cfg.decimals), unit = kind === "diff" ? cfg.unit : (cfg.viewUnit ?? cfg.unit);
+  const fmt = v => kind === "diff" ? signed(v, vd) : fixed(v, vd);
+  ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+  const text = (t, x, y, align, size = 11) => {
+    ctx.font = `600 ${size * dpr}px system-ui, sans-serif`; ctx.textAlign = align;
+    ctx.lineWidth = 3.2 * dpr; ctx.strokeStyle = ring; ctx.strokeText(t, x, y);
+    ctx.fillStyle = `rgb(${ink})`; ctx.fillText(t, x, y);
+  };
+  if (state.marks === "grid") {
+    const step = Math.max(1, Math.round((kind === "diff" ? 60 : 46) / (cssW / crop.sw))); // la diferencia lleva signo y un decimal más: más espacio
+    let drawn = 0;
+    for (let r = Math.ceil(crop.sy / step) * step; r < crop.sy + crop.sh && drawn < 2500; r += step) {
+      for (let i = Math.ceil(crop.sx / step) * step; i < crop.sx + crop.sw; i += step) {
+        const j = g.ny - 1 - r, k = j * g.nx + i;
+        if (j < 0 || i >= g.nx || !ok(k)) continue;
+        text(fmt(vals[k]), X(i), Y(j), "center", 10); drawn++;
+      }
+    }
+    return `Valores de la malla cada ~${Math.round(step * 2)} km`;
+  }
+  // máximo y mínimo (1 de cada) o picos (8 con el filtro «mayor que» / «menor que», 5 de cada con otro): se calculan una vez
+  const ft = state.filter.op, extremes = state.marks === "extremes";
+  const key = [kind, state.marks, state.scope, state.scope === "view" ? state.region : "", filterText(), elevText(), state.surface].join("|");
+  if (!state.marksCache[key]) {
+    const n = extremes ? 1 : ft === "gt" || ft === "lt" ? 8 : 5, R = extremes ? 0 : 25, peaks = [];
+    if (extremes || ft !== "lt") peaks.push(...findPeaks(vals, ok, g, n, 1, R));
+    if (extremes || ft !== "gt") peaks.push(...findPeaks(vals, ok, g, n, -1, R));
+    state.marksCache[key] = peaks;
+  }
+  for (const pk of state.marksCache[key]) {
+    const x = X(pk.k % g.nx), y = Y(Math.floor(pk.k / g.nx));
+    if (x < 0 || y < 0 || x > W || y > H) continue;
+    ctx.beginPath(); ctx.arc(x, y, 6 * dpr, 0, 7); ctx.fillStyle = ring; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, 4 * dpr, 0, 7); ctx.fillStyle = pk.dir > 0 ? "#d7301f" : "#2166ac"; ctx.fill();
+    const right = x < W - 70 * dpr;
+    text(`${pk.dir > 0 ? "▲" : "▼"} ${fmt(pk.v)}${extremes ? " " + unit : ""}`, x + (right ? 9 : -9) * dpr, y - 9 * dpr, right ? "left" : "right");
+  }
+  return extremes ? `Máximo y mínimo del ámbito: ${scopeLabel()}` : `Picos separados ≥ 50 km (ámbito: ${scopeLabel()})`;
 }
 
 function drawArrows(ctx, which, color, width, crop, f, dpr, cssW) {
@@ -647,16 +754,16 @@ function drawArrowKey() {
 }
 
 // `ok(k)` / `okv(k, v)`: ¿la celda k cumple el filtro de altitud y el de valores? `filtered`: hay algún filtro activo.
-function diffTiles(cfg, layers, ok, filtered) {
-  const diff = layers.diff;
-  let pass = 0, n = 0, sum = 0, sq = 0, ab = 0, mx = -Infinity, mn = Infinity, gt = 0;
+function diffTiles(cfg, layers, ok, filtered, scopeCount) {
+  const diff = layers.diff, g = layers.grid, area = c => `${(c * 4).toLocaleString("es-ES")} km²`;
+  let pass = 0, n = 0, sum = 0, sq = 0, ab = 0, mx = -Infinity, mn = Infinity, gt = 0, kmx = -1, kmn = -1;
   for (let k = 0; k < diff.length; k++) {
     if (!ok(k)) continue;
     pass++;
     const d = diff[k];
     if (!Number.isFinite(d)) continue;
     n++; sum += d; sq += d * d; ab += Math.abs(d);
-    if (d > mx) mx = d; if (d < mn) mn = d; if (Math.abs(d) > cfg.thresh) gt++;
+    if (d > mx) { mx = d; kmx = k; } if (d < mn) { mn = d; kmn = k; } if (Math.abs(d) > cfg.thresh) gt++;
   }
   const dec = cfg.decimals + 1, u = ` ${cfg.unit}`;
   const sg = v => signed(v, dec), pc = (x, t) => t ? `${(100 * x / t).toFixed(1)} %` : "—";
@@ -666,7 +773,7 @@ function diffTiles(cfg, layers, ok, filtered) {
     tiles = [
       ["Módulo medio de la diferencia", (sum / n).toFixed(dec) + u],
       ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
-      ["Máximo", mx.toFixed(dec) + u],
+      ["Máximo", mx.toFixed(dec) + u + where(g, kmx)],
       [`Celdas con diferencia > ${cfg.thresh}${u}`, pc(gt, n)],
     ];
   } else {
@@ -674,8 +781,8 @@ function diffTiles(cfg, layers, ok, filtered) {
       ["Diferencia media", sg(sum / n) + u],
       ["Diferencia absoluta media", (ab / n).toFixed(dec) + u],
       ["Error cuadrático medio", Math.sqrt(sq / n).toFixed(dec) + u],
-      [`Última ${cfg.pos} (máx.)`, sg(mx) + u],
-      [`Última ${cfg.neg} (máx.)`, sg(mn) + u],
+      [`Última ${cfg.pos} (máx.)`, sg(mx) + u + where(g, kmx)],
+      [`Última ${cfg.neg} (máx.)`, sg(mn) + u + where(g, kmn)],
       [`Celdas con |Δ| > ${cfg.thresh}${u}`, pc(gt, n)],
     ];
     if (layers.kind === "wdiff") {
@@ -684,42 +791,46 @@ function diffTiles(cfg, layers, ok, filtered) {
       tiles.push([`Celdas con viento ≥ ${Math.round(cfg.minSpeed * cfg.viewFactor)} ${cfg.viewUnit} en ambas salidas`, pc(n, pass)]);
     }
   }
-  if (filtered) tiles.push(["Celdas que cumplen los filtros", pc(pass, diff.length)]);
+  if (filtered) tiles.push(["Celdas que cumplen los filtros", `${pc(pass, scopeCount)} <small>≈ ${area(pass)}</small>`]);
   return tiles;
 }
 
+const where = (g, k) => k >= 0 ? ` <small>${cellLonLat(g, k)}</small>` : "";
+
 // Mínimo, media y máximo de los datos de cada mapa en bruto mostrado (solo de las celdas que cumplen los filtros).
-function rawTiles(cfg, layers, arr, name, okv, filtered) {
-  const mv = cfg.minValue ?? null;
-  let n = 0, total = 0, sum = 0, mn = Infinity, mx = -Infinity, above = 0, finite = 0;
+function rawTiles(cfg, layers, arr, name, okv, filtered, sc) {
+  const mv = cfg.minValue ?? null, xv = cfg.maxValue ?? null, g = layers.grid;
+  let n = 0, total = 0, sum = 0, mn = Infinity, mx = -Infinity, above = 0, finite = 0, kmn = -1, kmx = -1;
   for (let k = 0; k < arr.length; k++) {
     const v = arr[k];
-    if (!Number.isFinite(v)) continue;
+    if (!Number.isFinite(v) || (sc && !sc[k])) continue;
     finite++;
     if (mv != null && v < mv) continue; // por debajo del mínimo: ni pintado ni contado
     above++;
     total++;
     if (!okv(k, v)) continue;
-    n++; sum += v; if (v < mn) mn = v; if (v > mx) mx = v;
+    n++; sum += v; if (v < mn) { mn = v; kmn = k; } if (v > mx) { mx = v; kmx = k; }
   }
   const vd = cfg.viewDecimals ?? cfg.decimals, vu = ` ${cfg.viewUnit ?? cfg.unit}`, w = layers.wind ? " · velocidad" : "";
   const tiles = n === 0
     ? [[`${name}${w}`, "sin celdas"]]
-    : [[`${name}${w} · mínimo`, mn.toFixed(vd) + vu], [`${name}${w} · media`, (sum / n).toFixed(vd) + vu], [`${name}${w} · máximo`, mx.toFixed(vd) + vu]];
+    : [[`${name}${w} · mínimo`, fixed(mn, vd) + vu + where(g, kmn)], [`${name}${w} · media`, fixed(sum / n, vd) + vu], [`${name}${w} · máximo`, fixed(mx, vd) + vu + where(g, kmx)]];
   if (mv != null) tiles.push([`${name} · celdas con ≥ ${num(mv)} ${vu.trim()}`, `${(100 * above / finite).toFixed(1)} %`]);
-  if (filtered) tiles.push([`${name} · celdas que cumplen los filtros`, `${(100 * n / total).toFixed(1)} %`]);
+  if (filtered) tiles.push([`${name} · celdas que cumplen los filtros`, `${(100 * n / total).toFixed(1)} % <small>≈ ${(n * 4).toLocaleString("es-ES")} km²</small>`]);
   return tiles;
 }
 
 function drawStats(cfg, layers) {
   const m = filterMatcher(), em = state.cellMask, filtered = !!(m || em), tiles = [];
+  const { mask: sc, count } = scopeMask(); // las estadísticas cuentan solo las celdas del ámbito
   const okv = (k, v) => (!em || em[k] === 1) && (!m || m(v)); // el mínimo (minValue) lo aplica rawTiles
   const mv = cfg.minValue ?? null;
-  const okd = k => (!em || em[k] === 1) && (mv == null || layers.a[k] >= mv || layers.b[k] >= mv) && (!m || m(layers.a[k]) || m(layers.b[k]));
-  if (state.shown.a) tiles.push(...rawTiles(cfg, layers, layers.a, panelName("a"), okv, filtered));
-  if (state.shown.b && layers.b) tiles.push(...rawTiles(cfg, layers, layers.b, panelName("b"), okv, filtered));
-  if (state.shown.diff && layers.diff) tiles.push(...diffTiles(cfg, layers, okd, filtered));
-  $("stats").innerHTML = tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
+  const okd = k => (!sc || sc[k]) && (!em || em[k] === 1) && (mv == null || layers.a[k] >= mv || layers.b[k] >= mv) && (!m || m(layers.a[k]) || m(layers.b[k]));
+  if (state.shown.a) tiles.push(...rawTiles(cfg, layers, layers.a, panelName("a"), okv, filtered, sc));
+  if (state.shown.b && layers.b) tiles.push(...rawTiles(cfg, layers, layers.b, panelName("b"), okv, filtered, sc));
+  if (state.shown.diff && layers.diff) tiles.push(...diffTiles(cfg, layers, okd, filtered, count));
+  $("stats").innerHTML = `<div class="scope">Estadísticas del ámbito: <b>${scopeLabel()}</b> · ≈ ${(count * 4).toLocaleString("es-ES")} km²</div>` +
+    tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
 }
 
 // ---------- Tooltip ----------
@@ -782,7 +893,7 @@ function syncFilterUI() {
 
 // Aplica el filtro: no hay que descargar nada, solo repintar mapas, flechas y estadísticas.
 function applyFilter() {
-  state.images = {};
+  state.images = {}; state.marksCache = {};
   if (!state.layers) return;
   drawAll();
   drawStats(state.cfg, state.layers);
@@ -940,7 +1051,15 @@ function init() {
     try { localStorage.setItem("ukv.contours", state.contours ? "1" : "0"); } catch { /* idem */ }
     drawAll();
   });
-  $("region").addEventListener("input", () => { state.region = $("region").value; drawAll(); });
+  $("region").addEventListener("input", () => { state.region = $("region").value; state.marksCache = {}; drawAll(); if (state.layers) drawStats(state.cfg, state.layers); }); // «zona visible» cambia el ámbito
+  for (const [id, key] of [["marks", "marks"], ["scope", "scope"]]) {
+    try { const v = localStorage.getItem("ukv." + key); if (v && [...$(id).options].some(o => o.value === v)) { $(id).value = v; state[key] = v; } } catch { /* sin almacenamiento */ }
+    $(id).addEventListener("input", () => {
+      state[key] = $(id).value; state.marksCache = {};
+      try { localStorage.setItem("ukv." + key, state[key]); } catch { /* idem */ }
+      if (state.layers) { drawAll(); drawStats(state.cfg, state.layers); }
+    });
+  }
   $("panels").addEventListener("click", e => {
     const b = e.target.closest("button");
     if (!b) return;

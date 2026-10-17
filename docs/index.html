@@ -101,6 +101,8 @@
   .stat { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:var(--card); }
   .stat span { display:block; font-size:.75rem; color:var(--muted); }
   .stat b { font-size:1.15rem; font-variant-numeric:tabular-nums; }
+  .stat small { display:block; font-size:.7rem; font-weight:400; color:var(--muted); }
+  .stats .scope { grid-column:1 / -1; font-size:.8rem; color:var(--muted); }
   .foot { font-size:.8rem; color:var(--muted); margin-top:14px; }
   a { color:var(--accent); }
 </style>
@@ -157,6 +159,21 @@
             <button data-c="0" aria-pressed="true">No</button>
             <button data-c="1" aria-pressed="false">Sí</button>
           </span>
+        </label>
+        <label>Valores en el mapa
+          <select id="marks">
+            <option value="none">Ninguno</option>
+            <option value="extremes">Máximo y mínimo</option>
+            <option value="peaks">Picos (según el filtro de valores)</option>
+            <option value="grid">Rejilla de valores</option>
+          </select>
+        </label>
+        <label>Ámbito de estadísticas y marcas
+          <select id="scope">
+            <option value="view">Zona visible</option>
+            <option value="uk">Reino Unido e Irlanda</option>
+            <option value="grid">Dominio completo del modelo</option>
+          </select>
         </label>
         <label>Mapas
           <span class="seg" id="panels" role="group" aria-label="Mapas a mostrar">
