@@ -516,6 +516,7 @@ function rebuildCellMask() {
 
 // La costa se carga antes de dibujar nada, para que drawPanel sea síncrono (sin carreras al redimensionar).
 const coast = await (await fetch("coast.json")).json();
+const ukRings = await (await fetch("uk.json")).json(); // contorno del Reino Unido (scripts/build-uk.mjs) para el ámbito «Solo Reino Unido»
 
 function drawAll() {
   for (const p of panels) withCtx(p.ctx, () => drawPanel(p));
@@ -629,13 +630,31 @@ function drawContours(ctx, p, crop, f, dpr, ink, ring, cs) {
 }
 
 // ---------- Ámbito (estadísticas y marcas) ----------
-const SCOPES = { view: "Zona visible", uk: "Reino Unido e Irlanda", grid: "Dominio completo del modelo" };
+const SCOPES = { view: "Zona visible", uk: "Reino Unido e Irlanda", ukonly: "Solo Reino Unido (fronteras)", grid: "Dominio completo del modelo" };
 const scopeLabel = () => state.scope === "view" ? `zona visible (${REGIONS[state.region].label})` : SCOPES[state.scope];
 // Máscara 0/1 de las celdas del ámbito (null = todo el dominio) y su nº de celdas.
+// El contorno del Reino Unido se rasteriza sobre la malla (un lienzo del tamaño de la malla): una celda es del UK si el contorno cubre más de la mitad.
+function ukOutlineMask(g) {
+  const cv = document.createElement("canvas"); cv.width = g.nx; cv.height = g.ny;
+  const ctx = cv.getContext("2d", { willReadFrequently: true }), path = new Path2D();
+  for (const ring of ukRings) {
+    ring.forEach(([lon, lat], k) => { const [x, y] = toImagePx(g, lon, lat); k ? path.lineTo(x, y) : path.moveTo(x, y); });
+    path.closePath();
+  }
+  ctx.fillStyle = "#000"; ctx.fill(path);
+  const px = ctx.getImageData(0, 0, g.nx, g.ny).data, mask = new Uint8Array(g.nx * g.ny);
+  let count = 0;
+  for (let r = 0; r < g.ny; r++) for (let i = 0; i < g.nx; i++) {
+    if (px[(r * g.nx + i) * 4 + 3] >= 128) { mask[(g.ny - 1 - r) * g.nx + i] = 1; count++; }
+  }
+  return { mask, count };
+}
+
 function scopeMask() {
   const g = state.layers.grid, regionId = state.scope === "view" ? state.region : state.scope === "uk" ? "uk" : "grid";
-  const key = regionId + "|" + g.nx;
+  const key = (state.scope === "ukonly" ? "ukonly" : regionId) + "|" + g.nx;
   if (state.scopeMaskCache?.key === key) return state.scopeMaskCache;
+  if (state.scope === "ukonly") return (state.scopeMaskCache = { key, ...ukOutlineMask(g) });
   let mask = null, count = g.nx * g.ny;
   if (REGIONS[regionId].box) {
     const c = getCrop(g, regionId);

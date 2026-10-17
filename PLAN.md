@@ -262,3 +262,10 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Filtro de valores:** el del mapa también restringe las isolíneas de otra variable (solo donde el mapa se pinta). La leyenda indica «Isolíneas de <variable> cada N unidad» y el cuadro de valores añade el valor de esa variable en la celda.
 - Con el relieve como mapa único no se ofrecen (la variable estática no limita alcances; se ignoran).
 - Probado en Chromium: T + isobaras (mapa, salida anterior y diferencia), dos variables (T/nubosidad) con isolíneas de viento, y vuelta a «La misma variable»; sin errores.
+
+## Ámbito «Solo Reino Unido (fronteras)» (18 oct)
+
+- Nueva opción del selector de ámbito: las estadísticas y las marcas (máx./mín., picos y rejilla) cuentan solo las celdas del Reino Unido (Inglaterra, Escocia, Gales, Irlanda del Norte y sus islas), sin Irlanda, Francia ni mar.
+- **Datos:** `docs/uk.json` (32 kB, ≈ 8 kB comprimido), generado con `node scripts/build-uk.mjs` a partir de Natural Earth 1:10m (`world-atlas`, `countries-10m.json`, «United Kingdom»): 56 anillos, 2366 puntos, redondeados a 2 decimales (~1 km) y simplificados con Douglas–Peucker (0,01°, ≈ 1 km, la mitad de una celda).
+- **Máscara:** el contorno se proyecta a la malla y se rasteriza en un lienzo del tamaño de la malla (`ukOutlineMask`); una celda es del UK si queda cubierta más de la mitad. Se cachea con el resto del ámbito.
+- **Verificación:** 243.692 km² (el área oficial del Reino Unido es ≈ 243.610 km²); el máximo del relieve del modelo dentro del UK es 1052 m en 57,09° N 3,65° O (Cairngorms; el UKV a 2 km suaviza las cimas, por eso el Ben Nevis no llega a su altura real de 1345 m). Con T (6 ene 2026, +24 h) el mínimo dentro del UK es −4,6 °C en Shetland y el máximo 8,6 °C en Cornualles.
