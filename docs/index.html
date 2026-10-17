@@ -101,6 +101,9 @@
   .stat { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:var(--card); }
   .stat span { display:block; font-size:.75rem; color:var(--muted); }
   .stat b { font-size:1.15rem; font-variant-numeric:tabular-nums; }
+  #maps figure.map { position:relative; }
+  .xh { position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border:2px solid #111; border-radius:50%; box-shadow:0 0 0 2px #fff; pointer-events:none; }
+  [hidden] { display:none !important; }
   .stat small { display:block; font-size:.7rem; font-weight:400; color:var(--muted); }
   .stats .scope { grid-column:1 / -1; font-size:.8rem; color:var(--muted); }
   .foot { font-size:.8rem; color:var(--muted); margin-top:14px; }
@@ -125,8 +128,17 @@
   <div id="app" class="side">
     <aside id="controls" class="panel" aria-label="Ajustes">
       <div class="row">
-        <label>Variable
+        <label>Mapas por variable
+          <span class="seg" id="modesw" role="group" aria-label="Una o dos variables">
+            <button data-m="1" aria-pressed="true">Una variable</button>
+            <button data-m="2" aria-pressed="false">Dos variables</button>
+          </span>
+        </label>
+        <label><span id="varlabel">Variable</span>
           <select id="variable"></select>
+        </label>
+        <label id="var2row" hidden>Variable del mapa 2
+          <select id="variable2"></select>
         </label>
         <label>Última salida
           <span style="display:flex;gap:6px">
@@ -184,7 +196,7 @@
         </label>
       </div>
       <div class="row" id="filterRow">
-        <label>Filtro de valores
+        <label><span id="fltlabel">Filtro de valores</span>
           <span class="fctl">
             <select id="fop" aria-label="Tipo de filtro">
               <option value="none">Sin filtro</option>
@@ -198,6 +210,22 @@
           </span>
         </label>
         <span id="fpresets" class="presets" role="group" aria-label="Atajos del filtro"></span>
+      </div>
+      <div class="row" id="filterRow2" hidden>
+        <label>Filtro de valores del mapa 2
+          <span class="fctl">
+            <select id="fop2" aria-label="Tipo de filtro">
+              <option value="none">Sin filtro</option>
+              <option value="lt">Menor que</option>
+              <option value="gt">Mayor que</option>
+              <option value="between">Entre</option>
+            </select>
+            <input type="number" id="fv1b" step="any" aria-label="Valor del filtro" disabled>
+            <input type="number" id="fv2b" step="any" aria-label="Segundo valor del filtro" disabled>
+            <span id="funit2"></span>
+          </span>
+        </label>
+        <span id="fpresets2" class="presets" role="group" aria-label="Atajos del filtro"></span>
       </div>
       <div class="row" id="elevRow">
         <label>Superficie

@@ -244,3 +244,13 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Estadísticas ampliadas:** los mínimos y máximos indican **dónde** están (lat/lon de la celda, con la proyección inversa de `docs/laea.js`) y «celdas que cumplen los filtros» añade el área (cada celda ≈ 4 km²). Se evita el «-0.0» (`fixed`).
 - «Solo Reino Unido» con fronteras exactas (polígono de países) queda como posible mejora; de momento el UK es la caja «Reino Unido e Irlanda». Altas y bajas (A/B) de presión, también pendiente.
 - Probado en Chromium (T con ámbito dominio/UK/Highlands; extremos, rejilla con zoom y picos con filtro < 0 °C; viento en los tres mapas con diferencia): sin errores. Con ámbito «Dominio completo» las estadísticas coinciden con las anteriores (−34,3 / 4,0 / 13,7 °C).
+
+## Modo «dos variables» (17 oct)
+
+- **Selector «Mapas por variable»: Una variable / Dos variables.** En el modo de dos variables se ven, lado a lado, **la última salida de cada variable** (mapa 1 con «Variable del mapa 1», mapa 2 con «Variable del mapa 2», por defecto nubosidad total). Se ocultan los botones de salida anterior/diferencia y «Comparar con»; al volver a «Una variable» se restauran.
+- **Filtros de valor independientes:** cada mapa tiene su propio filtro (tipo, valores y atajos de su variable, en su unidad). Los filtros de superficie y altitud, la zona, las isolíneas, los valores sobre el mapa y el ámbito son comunes. Cada mapa conserva su paleta, leyenda, flechas de viento, isolíneas y marcas.
+- **Tiempo común:** deslizador, fotogramas y fecha/salida compartidos; solo se ofrecen los alcances en que existen las dos variables (la estática, como el relieve, no limita).
+- **Cursor sincronizado:** el cuadro de valores muestra las dos variables en la celda (más terreno y tierra/mar) y aparece una cruz en el mismo punto de los dos mapas.
+- **Estadísticas:** un bloque por variable, con el mismo ámbito.
+- **Implementación:** `state.sec` es el contexto del segundo mapa (variable, datos, filtro, cachés); `withCtx` lo intercambia con los campos de `state` (cfg, layers, meta, filter, images, cachés, shown) mientras se dibuja, de modo que el resto del código (dibujo, filtros, isolíneas, marcas, estadísticas) no cambia. El filtro de valores pasa a tener dos juegos de controles (`FUI`).
+- Probado en Chromium (T + nubosidad con filtros distintos «< 0 °C» y «> 80 %», T + viento, T + presión con isolíneas y extremos en Highlands, relieve + presión, vuelta a una variable): sin errores.
