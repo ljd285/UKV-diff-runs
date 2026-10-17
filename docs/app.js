@@ -229,6 +229,7 @@ const state = {
   orog: null, land: null, cellMask: null,               // altura del terreno (m) y máscara 0/1 del filtro de altitud
   // Modo «dos variables»: el segundo mapa tiene su propio contexto (variable, datos, filtro de valores, cachés).
   // `withCtx` lo intercambia con los campos de `state` mientras se dibuja, así el resto del código no cambia.
+  ovKey: "same", ov: null, // isolíneas de otra variable (ovKey) y sus datos ({cfg, layers, contourCache})
   dual: false, savedShown: null,
   sec: { cfg: null, layers: null, meta: null, filter: { op: "none", v1: NaN, v2: NaN }, images: {}, arrowCache: new Map(),
          contourCache: {}, marksCache: {}, shown: { a: true, b: false, diff: false } },
@@ -268,12 +269,19 @@ const panelName = kind => state.cfg?.static ? "Terreno del modelo" : NAME[kind];
 
 let leads = []; // alcances válidos de la última salida para la variable y el desfase elegidos
 
+// Variable de las isolíneas cuando no es la del mapa (null si se usan las de la propia variable o no hay isolíneas).
+function overlayCfg() {
+  if (!state.contours || state.ovKey === "same" || (!state.dual && VARIABLES[$("variable").value].static)) return null;
+  return VARIABLES[state.ovKey];
+}
+
 function refreshLeads(wanted) {
   const off = needsB() ? Number($("offset").value) : 0, ch = new Date(runTime()).getUTCHours(), step = Number($("frames").value);
-  if (state.dual) { // solo los alcances en que existen las dos variables (la estática, como el relieve, no limita)
-    const cfgs = [$("variable").value, $("variable2").value].map(k => VARIABLES[k]).filter(c => !c.static);
-    leads = cfgs.length ? cfgs.map(c => validLeads(c, 0, ch, step)).reduce((a, b) => a.filter(h => b.includes(h))) : [0];
-  } else leads = validLeads(VARIABLES[$("variable").value], off, ch, step);
+  // solo los alcances en que existen todas las variables en juego (mapas e isolíneas de otra variable); la estática, como el relieve, no limita
+  const ov = overlayCfg();
+  const cfgs = [VARIABLES[$("variable").value], ...(state.dual ? [VARIABLES[$("variable2").value]] : []), ...(ov ? [ov] : [])];
+  const varying = cfgs.filter(c => !c.static);
+  leads = varying.length ? varying.map(c => validLeads(c, off, ch, step)).reduce((a, b) => a.filter(h => b.includes(h))) : [0];
   wanted ??= 24;
   $("lead").max = Math.max(0, leads.length - 1);
   let best = 0; // conserva el alcance pedido o el más cercano que exista
@@ -343,8 +351,10 @@ async function update() {
     // (para los filtros de altitud y superficie y para el tooltip).
     const staticP = loadStatics(c.tA, c.cfg.static);
     const leadOf = cfg => cfg.static ? 0 : c.lead; // el relieve se lee siempre del alcance 0
-    const [SA, SB, st, S2] = await Promise.all([loadSet(c.tA, leadOf(c.cfg), c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null, staticP,
-      dual ? loadSet(c.tA, leadOf(cfg2), cfg2) : null]);
+    const ovc = overlayCfg();
+    const [SA, SB, st, S2, OA, OB] = await Promise.all([loadSet(c.tA, leadOf(c.cfg), c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null, staticP,
+      dual ? loadSet(c.tA, leadOf(cfg2), cfg2) : null,
+      ovc ? loadSet(c.tA, leadOf(ovc), ovc) : null, ovc && needB ? loadSet(c.tB, c.leadB, ovc) : null]);
     if (token !== state.token) return;
     if (!state.orog) state.orog = c.cfg.static ? SA.main.data : st.orog; // si es la variable "relieve", ya está en SA
     if (!state.orog && dual && cfg2.static) state.orog = S2.main.data;
@@ -359,6 +369,7 @@ async function update() {
           b: needB ? { run: `salida ${shortStamp(c.tB)}`, fc: fcText(c.tB, c.leadB) } : null,
           diff: { run: "última − anterior", fc: `validez ${stampText(c.tA + c.lead * HOUR)}` } };
     state.images = {}; state.arrowCache.clear(); state.contourCache = {}; state.marksCache = {}; state.scopeMaskCache = null;
+    state.ov = ovc ? { cfg: ovc, layers: compute(ovc, OA, OB, state.orog), contourCache: {} } : null; // isolíneas de otra variable
     if (dual) { // contexto del segundo mapa: se reinician sus cachés (el filtro de valores se conserva)
       Object.assign(state.sec, { cfg: cfg2, layers: compute(cfg2, S2, null, state.orog), meta: metaFor(cfg2, c),
         images: {}, arrowCache: new Map(), contourCache: {}, marksCache: {}, shown: { a: true, b: false, diff: false } });
@@ -539,7 +550,7 @@ function drawPanel(p) {
     if (p.kind !== "a" && L.rawB) drawArrows(ctx, "B", st.B, 1.8, crop, f, dpr, cssW);
     if (p.kind !== "b") drawArrows(ctx, "A", st.A, 1.6, crop, f, dpr, cssW);
   }
-  const contourNote = state.contours && cfg.contour ? drawContours(ctx, p, crop, f, dpr, ink, ring) : null;
+  const cs = contourSource(), contourNote = state.contours && cs ? drawContours(ctx, p, crop, f, dpr, ink, ring, cs) : null;
   const marksNote = state.marks !== "none" ? drawMarks(ctx, p, crop, f, dpr, cssW, ink, ring) : null;
   for (const [lon, lat] of CITIES) {
     const [x, y] = to(lon, lat);
@@ -560,23 +571,32 @@ function drawPanel(p) {
   for (const t of [contourNote, marksNote]) if (t) { const n = document.createElement("span"); n.className = "note"; n.textContent = t; p.legend.append(n); }
 }
 
-// Isolíneas del campo de la salida mostrada (en la diferencia, las de la última salida). Se calculan una vez por campo
-// (suavizadas y a resolución de malla) y al dibujar solo se filtran por zona, altitud/superficie y valor.
-function contourData(src, cfg) {
-  if (state.contourCache[src]) return state.contourCache[src];
-  const L = state.layers, g = L.grid, { step } = cfg.contour;
-  const lo = Math.max(cfg.range[0], cfg.minValue ?? -Infinity), hi = Math.min(cfg.range[1], cfg.maxValue ?? Infinity);
-  const levels = contourLevels(lo, hi, step);
-  let data = L[src];
-  if (!cfg.static) for (let n = 0; n < (cfg.contour.smooth ?? 1); n++) data = smoothField(data, g.nx, g.ny);
-  return (state.contourCache[src] = { levels, segs: buildContours(data, g.nx, g.ny, levels, cfg.contour.minSegs), vals: L[src] });
+// De dónde salen las isolíneas: de otra variable (state.ov) o de la propia del mapa; null si no tiene equidistancia definida.
+function contourSource() {
+  if (state.ov && overlayCfg()) return state.ov.cfg.contour ? { cfg: state.ov.cfg, layers: state.ov.layers, cache: state.ov.contourCache, overlay: true } : null;
+  return state.cfg.contour ? { cfg: state.cfg, layers: state.layers, cache: state.contourCache, overlay: false } : null;
 }
 
-function drawContours(ctx, p, crop, f, dpr, ink, ring) {
-  const L = state.layers, g = L.grid, cfg = state.cfg, { step, major } = cfg.contour;
-  const src = p.kind === "b" ? "b" : "a", cd = contourData(src, cfg);
-  const m = filterMatcher(), em = state.cellMask, other = p.kind === "diff" ? L.b : null;
-  const ok = k => (!em || em[k] === 1) && (!m || m(cd.vals[k]) || (other && m(other[k])));
+// Isolíneas del campo de la salida mostrada (en la diferencia, las de la última salida). Se calculan una vez por campo
+// (suavizadas y a resolución de malla) y al dibujar solo se filtran por zona, altitud/superficie y valor.
+function contourData(src, cs) {
+  const { cfg, layers: L, cache } = cs;
+  if (cache[src]) return cache[src];
+  const g = L.grid, { step } = cfg.contour;
+  const lo = Math.max(cfg.range[0], cfg.minValue ?? -Infinity), hi = Math.min(cfg.range[1], cfg.maxValue ?? Infinity);
+  const levels = contourLevels(lo, hi, step);
+  let data = L[src] ?? L.a;
+  if (!cfg.static) for (let n = 0; n < (cfg.contour.smooth ?? 1); n++) data = smoothField(data, g.nx, g.ny);
+  return (cache[src] = { levels, segs: buildContours(data, g.nx, g.ny, levels, cfg.contour.minSegs), vals: L[src] ?? L.a });
+}
+
+function drawContours(ctx, p, crop, f, dpr, ink, ring, cs) {
+  const L = state.layers, g = L.grid, { cfg, overlay } = cs, { step, major } = cfg.contour;
+  const src = p.kind === "b" ? "b" : "a", cd = contourData(src, cs);
+  const m = filterMatcher(), em = state.cellMask;
+  // el filtro de valores es el del mapa: las isolíneas (también las de otra variable) solo donde el mapa se pinta por el filtro
+  const mine = p.kind === "b" ? L.b : L.a, other = p.kind === "diff" ? L.b : null;
+  const ok = k => (!em || em[k] === 1) && (!m || m(mine[k]) || (other && m(other[k])));
   const X = i => (i + 0.5 - crop.sx) * f, Y = j => (g.ny - 1 - j + 0.5 - crop.sy) * f;
   const W = crop.sw * f, H = crop.sh * f, vd = cfg.viewDecimals ?? cfg.decimals, labels = [], majors = [];
   ctx.lineCap = "round"; ctx.lineJoin = "round";
@@ -605,7 +625,7 @@ function drawContours(ctx, p, crop, f, dpr, ink, ring) {
     ctx.lineWidth = 3.2 * dpr; ctx.strokeStyle = ring; ctx.strokeText(txt, x, y);
     ctx.fillStyle = `rgb(${ink})`; ctx.fillText(txt, x, y);
   }
-  return `Isolíneas cada ${step} ${cfg.viewUnit ?? cfg.unit}${p.kind === "diff" ? " (de la última salida)" : ""}`;
+  return `Isolíneas${overlay ? ` de ${cfg.label}` : ""} cada ${step} ${cfg.viewUnit ?? cfg.unit}${p.kind === "diff" ? " (de la última salida)" : ""}`;
 }
 
 // ---------- Ámbito (estadísticas y marcas) ----------
@@ -918,6 +938,10 @@ function onMove(e, canvas, kind) {
     q.xh.style.left = `${q.canvas.offsetLeft + fx * q.canvas.clientWidth}px`;
     q.xh.style.top = `${q.canvas.offsetTop + fy * q.canvas.clientHeight}px`;
   }
+  if (state.ov && overlayCfg()) { // valor de la variable de las isolíneas en la celda
+    const ov = state.ov, arr = ov.layers[kind === "b" ? "b" : "a"] ?? ov.layers.a;
+    html += `<br>${muted(ov.cfg.label)} <b>${arr[k].toFixed(ov.cfg.viewDecimals ?? ov.cfg.decimals)}</b> ${ov.cfg.viewUnit ?? ov.cfg.unit}`;
+  }
   if (state.orog && !(cfg.static && !state.dual)) {
     const sup = state.land ? ` · ${state.land[k] >= 0.5 ? "tierra" : "mar"}` : "";
     html += `<br>${muted(`Terreno ${Math.round(state.orog[k])} m${sup}`)}`;
@@ -1070,6 +1094,7 @@ function init() {
     `<optgroup label="${g.label}">${Object.entries(VARIABLES).filter(([, v]) => v.group === g.id)
       .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("")}</optgroup>`).join("");
   $("variable").value = DEFAULT_VARIABLE;
+  $("ovvar").innerHTML = `<option value="same">La misma variable del mapa</option>` + $("variable").innerHTML; // variable de las isolíneas
   $("variable2").innerHTML = $("variable").innerHTML; $("variable2").value = "cloud"; // segunda variable del modo de dos variables
   $("region").innerHTML = REGION_GROUPS.map(g =>
     `<optgroup label="${g.label}">${g.regions.map(r => `<option value="${r.id}">${r.label}</option>`).join("")}</optgroup>`).join("");
@@ -1133,8 +1158,10 @@ function init() {
     const b = e.target.closest("button"); if (!b) return;
     state.contours = b.dataset.c === "1"; syncContours();
     try { localStorage.setItem("ukv.contours", state.contours ? "1" : "0"); } catch { /* idem */ }
-    drawAll();
+    if (state.ovKey !== "same") { refreshLeads(currentLead()); update(); } // isolíneas de otra variable: hay que cargar sus datos
+    else drawAll();
   });
+  $("ovvar").addEventListener("input", () => { state.ovKey = $("ovvar").value; refreshLeads(currentLead()); syncControls(); update(); });
   $("region").addEventListener("input", () => { state.region = $("region").value; state.marksCache = {}; drawAll(); if (state.layers) drawStats(state.cfg, state.layers); }); // «zona visible» cambia el ámbito
   for (const [id, key] of [["marks", "marks"], ["scope", "scope"]]) {
     try { const v = localStorage.getItem("ukv." + key); if (v && [...$(id).options].some(o => o.value === v)) { $(id).value = v; state[key] = v; } } catch { /* sin almacenamiento */ }
