@@ -527,6 +527,57 @@ const ukRings = await (await fetch("uk.json")).json(); // contorno del Reino Uni
 
 function drawAll() {
   for (const p of panels) withCtx(p.ctx, () => drawPanel(p));
+  renderActive();
+}
+
+// ---------- Resumen de lo activo ----------
+// Etiquetas con los ajustes que no están por defecto (visibles aunque el panel esté plegado): cada una se quita con un clic,
+// y «Restablecer» quita todas. Los números de las secciones del panel cuentan las etiquetas de cada una.
+let activeList = [];
+const SEC_TITLES = { datos: "Datos", vista: "Vista", filtros: "Filtros" };
+function describeFilter(w) {
+  const f = filterOf(w), cfg = cfgOf(w), u = cfg.viewUnit ?? cfg.unit;
+  if (f.op === "lt" && Number.isFinite(f.v1)) return `< ${num(f.v1)} ${u}`;
+  if (f.op === "gt" && Number.isFinite(f.v1)) return `> ${num(f.v1)} ${u}`;
+  if (f.op === "between" && Number.isFinite(f.v1) && Number.isFinite(f.v2)) return `${num(Math.min(f.v1, f.v2))}–${num(Math.max(f.v1, f.v2))} ${u}`;
+  return null;
+}
+function activeItems() {
+  const it = [], add = (sec, text, reset) => it.push({ sec, text, reset });
+  const fire = (id, value) => { const el = $(id); el.value = value; el.dispatchEvent(new Event("input", { bubbles: true })); };
+  const optText = id => $(id).selectedOptions[0].textContent.toLowerCase();
+  if ($("frames").value !== "1") add("datos", `fotogramas: ${optText("frames")}`, () => fire("frames", "1"));
+  if (needsB() && $("offset").value !== "12") add("datos", `comparar con: ${optText("offset")}`, () => fire("offset", "12"));
+  if (!state.dual && (state.shown.b || state.shown.diff)) {
+    const names = ["última salida", state.shown.b && "salida anterior", state.shown.diff && "diferencia"].filter(Boolean);
+    add("vista", `mapas: ${names.join(" + ")}`, () => { for (const k of ["b", "diff"]) if (state.shown[k]) document.querySelector(`#panels button[data-k="${k}"]`).click(); });
+  }
+  if (state.region !== DEFAULT_REGION) add("vista", `zona: ${REGIONS[state.region].label}`, () => fire("region", DEFAULT_REGION));
+  if (state.contours) add("vista", state.ovKey === "same" ? "isolíneas" : `isolíneas de ${VARIABLES[state.ovKey].label.toLowerCase()}`, () => document.querySelector('#contoursw button[data-c="0"]').click());
+  if (state.marks !== "none") add("vista", `valores: ${optText("marks")}`, () => fire("marks", "none"));
+  if (state.scope !== "view") add("vista", `ámbito: ${SCOPES[state.scope].toLowerCase()}`, () => fire("scope", "view"));
+  for (const w of state.dual ? [0, 1] : [0]) {
+    const t = describeFilter(w);
+    if (t) add("filtros", `${state.dual ? `mapa ${w + 1}: ` : ""}valor ${t}`, () => { setFilterOf(w, { op: "none", v1: NaN, v2: NaN }); syncFilterUI(w); applyFilter(); });
+  }
+  if (state.surface !== "all") add("filtros", state.surface === "land" ? "solo tierra" : "solo mar", () => { state.surface = "all"; applyElev(); });
+  const { min, max } = state.elev, a = Number.isFinite(min), b = Number.isFinite(max);
+  if (a || b) add("filtros", a && b ? `terreno ${min}–${max} m` : a ? `terreno ≥ ${min} m` : `terreno < ${max} m`, () => { state.elev = { min: NaN, max: NaN }; applyElev(); });
+  return it;
+}
+function renderActive() {
+  activeList = activeItems();
+  const box = $("active");
+  box.hidden = activeList.length === 0;
+  box.innerHTML = activeList.length
+    ? `<span>Activo:</span>` + activeList.map((x, i) => `<button class="chip" data-i="${i}" title="Quitar este ajuste">${x.text}</button>`).join("") +
+      (activeList.length > 1 ? `<button class="reset" data-reset>Restablecer todo</button>` : "")
+    : "";
+  for (const d of document.querySelectorAll("#controls details.sec")) {
+    const n = activeList.filter(x => x.sec === d.dataset.sec).length, badge = d.querySelector(".badge");
+    badge.hidden = n === 0; badge.textContent = n;
+    badge.title = n ? `${n} ajuste${n > 1 ? "s" : ""} activo${n > 1 ? "s" : ""} en ${SEC_TITLES[d.dataset.sec]}` : "";
+  }
 }
 
 function drawPanel(p) {
@@ -1187,6 +1238,16 @@ function init() {
   refreshLeads(24);
   buildPanels();
   syncFilterUI(0); syncFilterUI(1); initFilter(); initElev();
+  // Secciones plegables del panel: se recuerda cuáles están abiertas; el resumen de lo activo se quita con un clic
+  for (const d of document.querySelectorAll("#controls details.sec")) {
+    try { const v = localStorage.getItem("ukv.sec." + d.dataset.sec); if (v !== null) d.open = v === "1"; } catch { /* sin almacenamiento */ }
+    d.addEventListener("toggle", () => { try { localStorage.setItem("ukv.sec." + d.dataset.sec, d.open ? "1" : "0"); } catch { /* idem */ } });
+  }
+  $("active").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.reset !== undefined) for (const x of activeList.slice()) x.reset();
+    else activeList[Number(b.dataset.i)]?.reset();
+  });
   initLayout();
 
   $("variable").addEventListener("input", () => {

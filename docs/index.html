@@ -104,6 +104,19 @@
   #maps figure.map { position:relative; }
   .xh { position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border:2px solid #111; border-radius:50%; box-shadow:0 0 0 2px #fff; pointer-events:none; }
   [hidden] { display:none !important; }
+  /* Secciones plegables del panel y resumen de lo activo */
+  #controls details.sec { border-top:1px solid var(--line); padding:2px 0 6px; }
+  #controls details.sec:first-of-type { border-top:0; }
+  #controls details.sec > summary { cursor:pointer; font-weight:600; padding:8px 0 6px; list-style:none; display:flex; align-items:center; gap:8px; user-select:none; }
+  #controls details.sec > summary::-webkit-details-marker { display:none; }
+  #controls details.sec > summary::before { content:"▸"; color:var(--muted); width:1em; transition:transform .12s; }
+  #controls details.sec[open] > summary::before { transform:rotate(90deg); }
+  .badge { background:var(--accent); color:#fff; border-radius:10px; font-size:.7rem; font-weight:600; padding:1px 7px; }
+  .active { display:flex; flex-wrap:wrap; gap:6px 6px; align-items:center; font-size:.8rem; color:var(--muted); }
+  .active .chip { border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:12px; padding:2px 9px; font-size:.78rem; cursor:pointer; }
+  .active .chip:hover { border-color:var(--accent); }
+  .active .chip::after { content:" ✕"; color:var(--muted); }
+  .active .reset { border:0; background:none; color:var(--accent); cursor:pointer; padding:2px 4px; font-size:.78rem; text-decoration:underline; }
   .stat small { display:block; font-size:.7rem; font-weight:400; color:var(--muted); }
   .stats .scope { grid-column:1 / -1; font-size:.8rem; color:var(--muted); }
   .foot { font-size:.8rem; color:var(--muted); margin-top:14px; }
@@ -127,6 +140,8 @@
 
   <div id="app" class="side">
     <aside id="controls" class="panel" aria-label="Ajustes">
+      <details class="sec" data-sec="datos" open>
+        <summary><span class="t">Datos</span><span class="badge" hidden></span></summary>
       <div class="row">
         <label>Mapas por variable
           <span class="seg" id="modesw" role="group" aria-label="Una o dos variables">
@@ -163,6 +178,18 @@
             <option value="24">Cada 24 h</option>
           </select>
         </label>
+      </div>
+      </details>
+      <details class="sec" data-sec="vista" open>
+        <summary><span class="t">Vista</span><span class="badge" hidden></span></summary>
+      <div class="row">
+        <label>Mapas
+          <span class="seg" id="panels" role="group" aria-label="Mapas a mostrar">
+            <button data-k="a" aria-pressed="true">Última salida</button>
+            <button data-k="b" aria-pressed="false">Salida anterior</button>
+            <button data-k="diff" aria-pressed="false">Diferencia</button>
+          </span>
+        </label>
         <label>Zona
           <select id="region"></select>
         </label>
@@ -192,15 +219,11 @@
             <option value="grid">Dominio completo del modelo</option>
           </select>
         </label>
-        <label>Mapas
-          <span class="seg" id="panels" role="group" aria-label="Mapas a mostrar">
-            <button data-k="a" aria-pressed="true">Última salida</button>
-            <button data-k="b" aria-pressed="false">Salida anterior</button>
-            <button data-k="diff" aria-pressed="false">Diferencia</button>
-          </span>
-        </label>
       </div>
-      <div class="row" id="filterRow">
+      </details>
+      <details class="sec" data-sec="filtros">
+        <summary><span class="t">Filtros</span><span class="badge" hidden></span></summary>
+<div class="row" id="filterRow">
         <label><span id="fltlabel">Filtro de valores</span>
           <span class="fctl">
             <select id="fop" aria-label="Tipo de filtro">
@@ -250,6 +273,7 @@
         </label>
         <span id="epresets" class="presets" role="group" aria-label="Atajos de altitud"></span>
       </div>
+            </details>
       <div class="info" id="info"></div>
     </aside>
 
@@ -265,6 +289,7 @@
         </label>
         <div class="info" id="status" role="status"></div>
       </div>
+      <div id="active" class="active" aria-label="Ajustes activos" hidden></div>
       <div id="maps" aria-live="polite"></div>
       <div id="arrowkey"></div>
       <div class="stats" id="stats"></div>
