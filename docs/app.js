@@ -119,16 +119,21 @@ async function loadField(cycleT, lead, file) {
 // Acumulado de `accum.hours` horas que termina en `lead`: suma los ficheros que cubren (lead − N, lead].
 // Hasta +54 h cada fichero es la hora anterior; desde +57 h, las 3 h anteriores (solo existen en múltiplos de 3 desde +54 h).
 async function loadAccum(cycleT, lead, cfg) {
-  const { hours, hourly, block } = cfg.accum, key = `acc:${cycleName(cycleT)}:${lead}:${hours}`;
+  const { hours, hourly, block, op = "sum" } = cfg.accum, key = `acc:${cycleName(cycleT)}:${lead}:${hours}:${hourly}:${op}`;
   if (cache.has(key)) return { main: cacheGet(key) };
   const parts = [];
   for (let h = lead - hours + 1; h <= lead; h++) {
-    if (h <= 54) parts.push(loadField(cycleT, h, hourly));
+    if (!block || h <= 54) parts.push(loadField(cycleT, h, hourly));
     else if ((h - 54) % 3 === 0) parts.push(loadField(cycleT, h, block));
   }
   const fields = await Promise.all(parts);
-  const sum = new Float32Array(fields[0].data.length);
-  for (const f of fields) for (let i = 0; i < sum.length; i++) sum[i] += f.data[i];
+  const sum = Float32Array.from(fields[0].data); // suma, máximo o mínimo de los ficheros del periodo
+  for (const f of fields.slice(1)) {
+    for (let i = 0; i < sum.length; i++) {
+      const v = f.data[i];
+      sum[i] = op === "max" ? Math.max(sum[i], v) : op === "min" ? Math.min(sum[i], v) : sum[i] + v;
+    }
+  }
   const out = { ...fields[0], data: sum };
   cacheSet(key, out);
   return { main: out };
@@ -246,7 +251,9 @@ const panelName = kind => state.cfg?.static ? "Terreno del modelo" : NAME[kind];
 let leads = []; // alcances válidos de la última salida para la variable y el desfase elegidos
 
 function refreshLeads(wanted) {
-  leads = validLeads(VARIABLES[$("variable").value], needsB() ? Number($("offset").value) : 0);
+  leads = validLeads(VARIABLES[$("variable").value], needsB() ? Number($("offset").value) : 0,
+    new Date(runTime()).getUTCHours(), Number($("frames").value));
+  wanted ??= 24;
   $("lead").max = Math.max(0, leads.length - 1);
   let best = 0; // conserva el alcance pedido o el más cercano que exista
   leads.forEach((h, i) => { if (Math.abs(h - wanted) < Math.abs(leads[best] - wanted)) best = i; });
@@ -288,14 +295,14 @@ async function loadStatics(tA, skipOrog) {
 async function update() {
   const c = readControls();
   const token = ++state.token;
-  if (c.lead === undefined) { setStatus("Esta variable no tiene alcances comunes para ese desfase."); return; }
+  if (c.lead === undefined) { setStatus("No hay alcances comunes para ese desfase y esos fotogramas."); return; }
   $("leadLabel").textContent = c.cfg.static ? "no aplica" : fcText(c.tA, c.lead);
   $("info").innerHTML = c.cfg.static
     ? "Relieve del modelo UKV 2 km · no varía con la salida ni con el alcance"
     : c.cfg.accum
       ? (() => { // misma fecha: "de 06Z a 12Z del Sábado 10 de octubre"; si no, las dos con su fecha
           const t0 = c.tA + (c.lead - c.cfg.accum.hours) * HOUR, t1 = c.tA + c.lead * HOUR;
-          return `Acumulado de <b>${c.cfg.accum.hours} h</b> · ` + (sameDay(t0, t1)
+          return `${c.cfg.accum.title ?? "Acumulado de"} <b>${c.cfg.accum.hours} h</b> · ` + (sameDay(t0, t1)
             ? `de ${hourText(t0)} a <b>${hourText(t1)}</b> del ${dayText(t1)} (validez)`
             : `de ${stampText(t0)} a <b>${stampText(t1)}</b> (validez)`);
         })()
@@ -908,7 +915,12 @@ function init() {
     update();
   });
   $("offset").addEventListener("input", () => { refreshLeads(currentLead()); update(); });
-  for (const id of ["date", "run"]) $(id).addEventListener("input", update);
+  for (const id of ["date", "run"]) $(id).addEventListener("input", () => { refreshLeads(currentLead()); update(); }); // la hora de la salida decide qué alcances caen en validHours
+  try { const v = localStorage.getItem("ukv.frames"); if (v && [...$("frames").options].some(o => o.value === v)) { $("frames").value = v; refreshLeads(currentLead()); } } catch { /* sin almacenamiento */ }
+  $("frames").addEventListener("input", () => {
+    try { localStorage.setItem("ukv.frames", $("frames").value); } catch { /* idem */ }
+    refreshLeads(currentLead()); update();
+  });
   // El deslizador actualiza la etiqueta al instante y descarga al soltar/pausar, no en cada paso.
   let timer;
   $("lead").addEventListener("input", () => {

@@ -227,3 +227,9 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 
 - Tres variables nuevas en «Humedad y nubes»: **Nubosidad baja, media y alta** (`cloud_amount_of_low/medium/high_cloud`, fracción 0–1 → %). Mismas escala fija (0…100 %), diferencia (±25 %), paleta «Sol–nube» + púrpura–naranja, atajos de filtro (< 20 %, > 80 %) e isolíneas (cada 25 %) que la nubosidad total, con base común `CLOUD_BASE` en `docs/variables.js`. Alcances: los habituales (cada hora hasta +54 h y cada 3 h hasta +120 h).
 - Probado en Chromium con la salida 15Z del 5 ene 2026; sin errores.
+
+## Fotogramas del deslizador y Tmáx/Tmín de 6 h (17 oct)
+
+- **Selector «Fotogramas del deslizador»** (Todos / cada 3 / 6 / 12 / 24 h; se recuerda en `localStorage`): el deslizador y las flechas ◀ ▶ solo recorren esos alcances. El paso se cuenta desde +0 h (`validLeads(cfg, offset, cycleHour, step)` en `docs/variables.js`); con la comparación, solo cuentan los alcances de la última salida que tienen pareja.
+- **Tmáx y Tmín de las 6 h previas** (`tmax6`, `tmin6`, grupo Temperatura): máximo (mínimo) de los 6 ficheros horarios `temperature_at_screen_level_max/min-PT01H` que cubren (validez − 6 h, validez], solo a las **00, 06, 12 y 18Z** (validez; «24Z» = 00Z del día siguiente). Implementado con `accum.op` (`"max"`/`"min"`; sin `block`, todos los ficheros son horarios) y `validHours: [0, 6, 12, 18]`, que filtra los alcances según la hora de la salida (03Z o 15Z) y por tanto se recalcula al cambiar fecha o salida; con `validHours`, el paso de los fotogramas se cuenta desde el primer alcance disponible (así «cada 12 h» da 00Z y 12Z). Mismas escalas, paletas, filtros e isolíneas que Tmáx/Tmín.
+- Verificado contra un cálculo independiente en Python (salida 15Z del 5 ene 2026, validez 12Z del 6 ene): Tmáx −28,8 / 4,5 / 13,6 °C y Tmín −37,0 / 2,1 / 12,4 °C (mín / media / máx), idénticos. La caché de acumulados ahora incluye fichero y operación en la clave.

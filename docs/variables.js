@@ -15,8 +15,10 @@
 //                     (p. ej. presión centrada en 1004 hPa); el rango [min, max] no tiene por qué ser simétrico.
 //   filterPresets     Atajos del filtro de valores: [{label, op: "lt" | "gt" | "between", v, v2?}] en la unidad de los mapas
 //                     (`viewUnit ?? unit`). En el visor el filtro admite además cualquier umbral escrito a mano.
-//   accum             {hours, hourly, block}: acumulado de `hours` horas hasta la hora de validez, sumando ficheros.
+//   accum             {hours, hourly, block, op, title}: acumulado de `hours` horas hasta la hora de validez, sumando ficheros.
 //                     Hasta +54 h hay un fichero por hora (`hourly`); de +57 a +120 h, uno por cada 3 h (`block`).
+//                     Sin `block`, todos los ficheros son horarios (p. ej. Tmáx/Tmín). `op`: "sum" (defecto), "max" o "min"; `title`: texto del encabezado.
+//   validHours        (opcional) horas UTC de validez permitidas, p. ej. [0, 6, 12, 18]: solo se ofrecen los alcances que caen en ellas.
 //   minValue          Valor mínimo mostrado (en la unidad de los mapas): las celdas por debajo no se pintan ni cuentan en
 //                     las estadísticas; en la diferencia se omiten solo las celdas que están por debajo en ambas salidas.
 //   maxValue          Valor máximo mostrado (en la unidad de los mapas): las celdas por encima no se pintan (se ve el fondo);
@@ -79,6 +81,11 @@ export const VARIABLES = {
   t:    { ...KELVIN, label: "Temperatura a 1,5 m", group: "temp", file: "temperature_at_screen_level", leads: "any" },
   tmax: { ...KELVIN, label: "Temperatura máxima (última hora)", group: "temp", file: "temperature_at_screen_level_max-PT01H", leads: "any", minLead: 1, range: [-5, 35] },
   tmin: { ...KELVIN, label: "Temperatura mínima (última hora)", group: "temp", file: "temperature_at_screen_level_min-PT01H", leads: "any", minLead: 1, range: [-10, 20] },
+  // Máxima / mínima de las 6 h previas, solo a las 00, 06, 12 y 18Z: máximo (mínimo) de los 6 ficheros horarios que cubren (validez − 6 h, validez]
+  tmax6: { ...KELVIN, label: "Temperatura máxima de las 6 h previas (00, 06, 12, 18Z)", group: "temp", leads: "any", range: [-5, 35],
+           validHours: [0, 6, 12, 18], accum: { hours: 6, hourly: "temperature_at_screen_level_max-PT01H", op: "max", title: "Máximo de" } },
+  tmin6: { ...KELVIN, label: "Temperatura mínima de las 6 h previas (00, 06, 12, 18Z)", group: "temp", leads: "any", range: [-10, 20],
+           validHours: [0, 6, 12, 18], accum: { hours: 6, hourly: "temperature_at_screen_level_min-PT01H", op: "min", title: "Mínimo de" } },
   td:   { ...KELVIN, label: "Punto de rocío", group: "temp", file: "temperature_of_dew_point_at_screen_level", leads: "std", range: [-10, 20], palette: { map: "clasica", diff: "naranja-verde" },
         pos: "más húmeda", neg: "más seca" }, // naranja = más seco (punto de rocío más bajo), verde = más húmedo
 
@@ -189,16 +196,22 @@ export const MAX_LEAD = 120;
 export function leadExists(cfg, h) {
   if (h < (cfg.minLead ?? 0) || h > MAX_LEAD) return false;
   // un acumulado de N h necesita N h de pronóstico y que su final caiga en una hora con fichero
-  if (cfg.accum) return h >= cfg.accum.hours && (h <= 54 || (h - 54) % 3 === 0);
+  if (cfg.accum) return h >= cfg.accum.hours && (!cfg.accum.block || h <= 54 || (h - 54) % 3 === 0);
   return cfg.leads === "any" || h <= 54 || (h - 54) % 3 === 0;
 }
 
 // Alcances de la pasada A para los que existen A y B (B = A + offset horas).
-export function validLeads(cfg, offset) {
+// `cycleHour`: hora UTC de la salida (para validHours); `step`: solo los alcances múltiplos de `step` horas (fotogramas del deslizador).
+export function validLeads(cfg, offset, cycleHour = 0, step = 1) {
   if (cfg.static) return [0]; // el relieve no depende del alcance
-  const out = [];
-  for (let h = 0; h + offset <= MAX_LEAD; h++) if (leadExists(cfg, h) && leadExists(cfg, h + offset)) out.push(h);
-  return out;
+  const all = [];
+  for (let h = 0; h + offset <= MAX_LEAD; h++) {
+    if (cfg.validHours && !cfg.validHours.includes((cycleHour + h) % 24)) continue; // misma hora de validez en las dos salidas
+    if (leadExists(cfg, h) && leadExists(cfg, h + offset)) all.push(h);
+  }
+  // Fotogramas: un alcance de cada `step` horas, contando desde +0 h (o, con validHours, desde el primero disponible)
+  const anchor = cfg.validHours ? (all[0] ?? 0) : 0;
+  return all.filter(h => (h - anchor) % step === 0);
 }
 
 // Atajos del filtro de valores. El filtro actúa sobre el valor de cada mapa (en el viento, sobre la velocidad)
@@ -206,6 +219,8 @@ export function validLeads(cfg, offset) {
 const FILTER_PRESETS = {
   t:    [{ label: "Helada (< 0 °C)", op: "lt", v: 0 }, { label: "> 20 °C", op: "gt", v: 20 }, { label: "> 30 °C", op: "gt", v: 30 }],
   tmax: [{ label: "Día de hielo (< 0 °C)", op: "lt", v: 0 }, { label: "> 25 °C", op: "gt", v: 25 }, { label: "> 30 °C", op: "gt", v: 30 }],
+  tmax6: [{ label: "Día de hielo (< 0 °C)", op: "lt", v: 0 }, { label: "> 25 °C", op: "gt", v: 25 }, { label: "> 30 °C", op: "gt", v: 30 }],
+  tmin6: [{ label: "Helada (< 0 °C)", op: "lt", v: 0 }, { label: "Helada fuerte (< −5 °C)", op: "lt", v: -5 }, { label: "> 15 °C", op: "gt", v: 15 }],
   tmin: [{ label: "Helada (< 0 °C)", op: "lt", v: 0 }, { label: "Helada fuerte (< −5 °C)", op: "lt", v: -5 }, { label: "> 15 °C", op: "gt", v: 15 }],
   td:   [{ label: "< 0 °C", op: "lt", v: 0 }, { label: "> 16 °C (bochorno)", op: "gt", v: 16 }],
   pmsl: [{ label: "< 1000 hPa", op: "lt", v: 1000 }, { label: "< 990 hPa", op: "lt", v: 990 }, { label: "> 1025 hPa", op: "gt", v: 1025 }],
@@ -232,7 +247,7 @@ for (const [k, presets] of Object.entries(FILTER_PRESETS)) VARIABLES[k].filterPr
 
 // Isolíneas (opcionales en el visor): equidistancia y cada cuántas líneas hay una principal con etiqueta.
 const CONTOURS = { // [equidistancia, cada cuántas una principal, pasadas de suavizado, segmentos mínimos de una línea]
-  t: [2, 5], tmax: [2, 5], tmin: [2, 5], td: [2, 5], pmsl: [4, 5],
+  t: [2, 5], tmax6: [2, 5], tmin6: [2, 5], tmax: [2, 5], tmin: [2, 5], td: [2, 5], pmsl: [4, 5],
   wind: [5, 4, 2], gust: [10, 5, 2], wdir: [5, 4, 2], wvec: [5, 4, 2],
   orog: [100, 5], rh: [10, 5, 2], cloud: [25, 2, 3], cloudlow: [25, 2, 3], cloudmid: [25, 2, 3], cloudhigh: [25, 2, 3], precip: [1, 2, 2],
   acc3: [2, 5, 2], acc6: [5, 2, 2], acc12: [10, 2, 2],
