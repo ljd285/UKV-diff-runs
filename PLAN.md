@@ -254,3 +254,11 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Estadísticas:** un bloque por variable, con el mismo ámbito.
 - **Implementación:** `state.sec` es el contexto del segundo mapa (variable, datos, filtro, cachés); `withCtx` lo intercambia con los campos de `state` (cfg, layers, meta, filter, images, cachés, shown) mientras se dibuja, de modo que el resto del código (dibujo, filtros, isolíneas, marcas, estadísticas) no cambia. El filtro de valores pasa a tener dos juegos de controles (`FUI`).
 - Probado en Chromium (T + nubosidad con filtros distintos «< 0 °C» y «> 80 %», T + viento, T + presión con isolíneas y extremos en Highlands, relieve + presión, vuelta a una variable): sin errores.
+
+## Isolíneas de otra variable (18 oct)
+
+- **Selector «Variable de las isolíneas»** (por defecto «La misma variable del mapa»): con «Isolíneas: Sí» y otra variable elegida, todos los mapas dibujan las isolíneas de esa variable (equidistancia, suavizado y etiquetas de `CONTOURS`) sobre su propio mapa; p. ej. temperatura de fondo con isobaras cada 4 hPa. Funciona en el modo de una variable (mapa, salida anterior y diferencia) y en el de dos.
+- **Datos y alcances:** la variable de las isolíneas se descarga con la misma salida y alcance (la salida anterior, para el mapa de la salida anterior) y los alcances ofrecidos son los comunes a todas las variables en juego. Para la diferencia se usan las isolíneas de la última salida. Se recalculan al cambiar de variable, alcance o salida.
+- **Filtro de valores:** el del mapa también restringe las isolíneas de otra variable (solo donde el mapa se pinta). La leyenda indica «Isolíneas de <variable> cada N unidad» y el cuadro de valores añade el valor de esa variable en la celda.
+- Con el relieve como mapa único no se ofrecen (la variable estática no limita alcances; se ignoran).
+- Probado en Chromium: T + isobaras (mapa, salida anterior y diferencia), dos variables (T/nubosidad) con isolíneas de viento, y vuelta a «La misma variable»; sin errores.
