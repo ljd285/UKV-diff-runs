@@ -229,6 +229,7 @@ const state = {
   orog: null, land: null, cellMask: null,               // altura del terreno (m) y máscara 0/1 del filtro de altitud
   // Modo «dos variables»: el segundo mapa tiene su propio contexto (variable, datos, filtro de valores, cachés).
   // `withCtx` lo intercambia con los campos de `state` mientras se dibuja, así el resto del código no cambia.
+  pm: null, // presión para las altas y bajas: {cfg, layers, cache}
   ovKey: "same", ov: null, // isolíneas de otra variable (ovKey) y sus datos ({cfg, layers, contourCache})
   dual: false, savedShown: null,
   sec: { cfg: null, layers: null, meta: null, filter: { op: "none", v1: NaN, v2: NaN }, images: {}, arrowCache: new Map(),
@@ -275,11 +276,15 @@ function overlayCfg() {
   return VARIABLES[state.ovKey];
 }
 
+// Presión para las altas y bajas (modo «Altas y bajas de presión» de los valores sobre el mapa); no se ofrece con el relieve como único mapa.
+const pressureCfg = () => state.marks === "highlow" && (state.dual || !VARIABLES[$("variable").value].static) ? VARIABLES.pmsl : null;
+
 function refreshLeads(wanted) {
   const off = needsB() ? Number($("offset").value) : 0, ch = new Date(runTime()).getUTCHours(), step = Number($("frames").value);
   // solo los alcances en que existen todas las variables en juego (mapas e isolíneas de otra variable); la estática, como el relieve, no limita
   const ov = overlayCfg();
-  const cfgs = [VARIABLES[$("variable").value], ...(state.dual ? [VARIABLES[$("variable2").value]] : []), ...(ov ? [ov] : [])];
+  const pc = pressureCfg();
+  const cfgs = [VARIABLES[$("variable").value], ...(state.dual ? [VARIABLES[$("variable2").value]] : []), ...(ov ? [ov] : []), ...(pc ? [pc] : [])];
   const varying = cfgs.filter(c => !c.static);
   leads = varying.length ? varying.map(c => validLeads(c, off, ch, step)).reduce((a, b) => a.filter(h => b.includes(h))) : [0];
   wanted ??= 24;
@@ -351,10 +356,11 @@ async function update() {
     // (para los filtros de altitud y superficie y para el tooltip).
     const staticP = loadStatics(c.tA, c.cfg.static);
     const leadOf = cfg => cfg.static ? 0 : c.lead; // el relieve se lee siempre del alcance 0
-    const ovc = overlayCfg();
-    const [SA, SB, st, S2, OA, OB] = await Promise.all([loadSet(c.tA, leadOf(c.cfg), c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null, staticP,
+    const ovc = overlayCfg(), pmc = pressureCfg();
+    const [SA, SB, st, S2, OA, OB, PA, PB] = await Promise.all([loadSet(c.tA, leadOf(c.cfg), c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null, staticP,
       dual ? loadSet(c.tA, leadOf(cfg2), cfg2) : null,
-      ovc ? loadSet(c.tA, leadOf(ovc), ovc) : null, ovc && needB ? loadSet(c.tB, c.leadB, ovc) : null]);
+      ovc ? loadSet(c.tA, leadOf(ovc), ovc) : null, ovc && needB ? loadSet(c.tB, c.leadB, ovc) : null,
+      pmc ? loadSet(c.tA, c.lead, pmc) : null, pmc && needB ? loadSet(c.tB, c.leadB, pmc) : null]);
     if (token !== state.token) return;
     if (!state.orog) state.orog = c.cfg.static ? SA.main.data : st.orog; // si es la variable "relieve", ya está en SA
     if (!state.orog && dual && cfg2.static) state.orog = S2.main.data;
@@ -369,6 +375,7 @@ async function update() {
           b: needB ? { run: `salida ${shortStamp(c.tB)}`, fc: fcText(c.tB, c.leadB) } : null,
           diff: { run: "última − anterior", fc: `validez ${stampText(c.tA + c.lead * HOUR)}` } };
     state.images = {}; state.arrowCache.clear(); state.contourCache = {}; state.marksCache = {}; state.scopeMaskCache = null;
+    state.pm = pmc ? { cfg: pmc, layers: compute(pmc, PA, PB, null), cache: {} } : null; // para las altas y bajas
     state.ov = ovc ? { cfg: ovc, layers: compute(ovc, OA, OB, state.orog), contourCache: {} } : null; // isolíneas de otra variable
     if (dual) { // contexto del segundo mapa: se reinician sus cachés (el filtro de valores se conserva)
       Object.assign(state.sec, { cfg: cfg2, layers: compute(cfg2, S2, null, state.orog), meta: metaFor(cfg2, c),
@@ -552,7 +559,8 @@ function drawPanel(p) {
     if (p.kind !== "b") drawArrows(ctx, "A", st.A, 1.6, crop, f, dpr, cssW);
   }
   const cs = contourSource(), contourNote = state.contours && cs ? drawContours(ctx, p, crop, f, dpr, ink, ring, cs) : null;
-  const marksNote = state.marks !== "none" ? drawMarks(ctx, p, crop, f, dpr, cssW, ink, ring) : null;
+  const marksNote = state.marks === "highlow" ? drawHighLow(ctx, p, crop, f, dpr, ink, ring)
+    : state.marks !== "none" ? drawMarks(ctx, p, crop, f, dpr, cssW, ink, ring) : null;
   for (const [lon, lat] of CITIES) {
     const [x, y] = to(lon, lat);
     if (x < 0 || y < 0 || x > W || y > H) continue;
@@ -749,6 +757,63 @@ function drawMarks(ctx, p, crop, f, dpr, cssW, ink, ring) {
     text(`${pk.dir > 0 ? "▲" : "▼"} ${fmt(pk.v)}${extremes ? " " + unit : ""}`, x + (right ? 9 : -9) * dpr, y - 9 * dpr, right ? "left" : "right");
   }
   return extremes ? `Máximo y mínimo del ámbito: ${scopeLabel()}` : `Picos separados ≥ 50 km (ámbito: ${scopeLabel()})`;
+}
+
+// ---------- Altas y bajas de presión ----------
+// Extremos locales de la presión a nivel del mar: el campo se suaviza y un punto es una alta (baja) si es el máximo (mínimo) de su
+// entorno de ~180 km y lo supera en al menos 2 hPa; entre dos extremos del mismo tipo más cerca que ese radio se queda el más fuerte.
+function findHighLow(vals, g) {
+  let data = vals;
+  for (let n = 0; n < 4; n++) data = smoothField(data, g.nx, g.ny);
+  const step = 6, R = 90, Rc = R / step, edge = 30, minAmp = 2; // en celdas de 2 km; minAmp en hPa
+  const ncx = Math.floor((g.nx - 2 * edge) / step), ncy = Math.floor((g.ny - 2 * edge) / step), C = new Float32Array(ncx * ncy);
+  for (let cj = 0; cj < ncy; cj++) for (let ci = 0; ci < ncx; ci++) C[cj * ncx + ci] = data[(edge + cj * step) * g.nx + edge + ci * step];
+  const found = [];
+  for (let cj = 0; cj < ncy; cj++) {
+    for (let ci = 0; ci < ncx; ci++) {
+      const v = C[cj * ncx + ci];
+      if (!Number.isFinite(v)) continue;
+      let isMax = true, isMin = true, lo = Infinity, hi = -Infinity;
+      for (let dj = Math.max(0, cj - Rc); dj <= Math.min(ncy - 1, cj + Rc) && (isMax || isMin); dj++) {
+        for (let di = Math.max(0, ci - Rc); di <= Math.min(ncx - 1, ci + Rc); di++) {
+          if ((di - ci) ** 2 + (dj - cj) ** 2 > Rc * Rc) continue;
+          const w = C[dj * ncx + di];
+          if (!Number.isFinite(w)) continue;
+          if (w > v) isMax = false;
+          if (w < v) isMin = false;
+          if (w < lo) lo = w;
+          if (w > hi) hi = w;
+        }
+      }
+      if (isMax && v - lo >= minAmp) found.push({ i: edge + ci * step, j: edge + cj * step, v, high: true });
+      else if (isMin && hi - v >= minAmp) found.push({ i: edge + ci * step, j: edge + cj * step, v, high: false });
+    }
+  }
+  found.sort((a, b) => (b.high ? b.v : -b.v) - (a.high ? a.v : -a.v));
+  const out = [];
+  for (const f of found) if (!out.some(o => o.high === f.high && Math.hypot(o.i - f.i, o.j - f.j) < R)) out.push(f);
+  return out;
+}
+
+// Dibuja una «A» (alta) o una «B» (baja) con la presión en hPa en cada extremo de la zona visible.
+function drawHighLow(ctx, p, crop, f, dpr, ink, ring) {
+  const pm = state.pm;
+  if (!pm) return null;
+  const src = p.kind === "b" ? "b" : "a", g = pm.layers.grid;
+  pm.cache[src] ??= findHighLow(pm.layers[src] ?? pm.layers.a, g);
+  const vals = pm.layers[src] ?? pm.layers.a, vd = pm.cfg.decimals;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+  const W = crop.sw * f, H = crop.sh * f;
+  for (const e of pm.cache[src]) {
+    const x = (e.i + 0.5 - crop.sx) * f, y = (g.ny - 1 - e.j + 0.5 - crop.sy) * f;
+    if (x < 10 * dpr || y < 14 * dpr || x > W - 10 * dpr || y > H - 20 * dpr) continue;
+    const color = e.high ? "#d7301f" : "#2166ac";
+    ctx.font = `800 ${24 * dpr}px system-ui, sans-serif`; ctx.lineWidth = 4 * dpr; ctx.strokeStyle = ring; ctx.strokeText(e.high ? "A" : "B", x, y);
+    ctx.fillStyle = color; ctx.fillText(e.high ? "A" : "B", x, y);
+    ctx.font = `600 ${11 * dpr}px system-ui, sans-serif`; ctx.lineWidth = 3.2 * dpr; ctx.strokeStyle = ring; ctx.strokeText(vals[e.j * g.nx + e.i].toFixed(0), x, y + 17 * dpr);
+    ctx.fillStyle = `rgb(${ink})`; ctx.fillText(vals[e.j * g.nx + e.i].toFixed(0), x, y + 17 * dpr);
+  }
+  return `A / B: altas y bajas de presión (extremos locales del campo suavizado, ≥ 2 hPa sobre su entorno de ~180 km), en ${pm.cfg.unit}`;
 }
 
 function drawArrows(ctx, which, color, width, crop, f, dpr, cssW) {
@@ -1185,9 +1250,11 @@ function init() {
   for (const [id, key] of [["marks", "marks"], ["scope", "scope"]]) {
     try { const v = localStorage.getItem("ukv." + key); if (v && [...$(id).options].some(o => o.value === v)) { $(id).value = v; state[key] = v; } } catch { /* sin almacenamiento */ }
     $(id).addEventListener("input", () => {
+      const was = state[key];
       state[key] = $(id).value; state.marksCache = {};
       try { localStorage.setItem("ukv." + key, state[key]); } catch { /* idem */ }
-      if (state.layers) { drawAll(); drawStats(state.cfg, state.layers); }
+      if (key === "marks" && (was === "highlow" || state.marks === "highlow")) { refreshLeads(currentLead()); update(); } // altas y bajas: hay que cargar la presión
+      else if (state.layers) { drawAll(); drawStats(state.cfg, state.layers); }
     });
   }
   $("panels").addEventListener("click", e => {
