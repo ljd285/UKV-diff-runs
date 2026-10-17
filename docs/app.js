@@ -227,7 +227,19 @@ const state = {
   elev: { min: NaN, max: NaN },             // filtro de altitud del terreno: [min, max) en metros
   surface: "all",                           // filtro de superficie: "all" | "land" | "sea"
   orog: null, land: null, cellMask: null,               // altura del terreno (m) y máscara 0/1 del filtro de altitud
+  // Modo «dos variables»: el segundo mapa tiene su propio contexto (variable, datos, filtro de valores, cachés).
+  // `withCtx` lo intercambia con los campos de `state` mientras se dibuja, así el resto del código no cambia.
+  dual: false, savedShown: null,
+  sec: { cfg: null, layers: null, meta: null, filter: { op: "none", v1: NaN, v2: NaN }, images: {}, arrowCache: new Map(),
+         contourCache: {}, marksCache: {}, shown: { a: true, b: false, diff: false } },
 };
+const CTX_KEYS = ["cfg", "layers", "meta", "filter", "images", "arrowCache", "contourCache", "marksCache", "shown"];
+function withCtx(ctx, fn) {
+  if (!ctx) return fn();
+  const saved = CTX_KEYS.map(k => state[k]);
+  CTX_KEYS.forEach(k => { state[k] = ctx[k]; });
+  try { return fn(); } finally { CTX_KEYS.forEach((k, i) => { ctx[k] = state[k]; state[k] = saved[i]; }); }
+}
 let panels = [];
 
 function defaultCycle() {
@@ -240,21 +252,28 @@ function defaultCycle() {
 }
 
 // La salida anterior solo se descarga (y condiciona los alcances) si se muestra ella o la diferencia.
-const isStatic = () => !!VARIABLES[$("variable").value].static; // p. ej. el relieve: no cambia con la salida
-const needsB = () => !isStatic() && (state.shown.b || state.shown.diff);
+const isStatic = () => !!VARIABLES[$("variable").value].static && (!state.dual || !!VARIABLES[$("variable2").value].static); // p. ej. el relieve: no cambia con la salida
+const needsB = () => !state.dual && !isStatic() && (state.shown.b || state.shown.diff);
 const syncControls = () => {
   const st = isStatic();
   $("offset").disabled = !needsB();
   $("lead").disabled = $("prev").disabled = $("next").disabled = st;
   for (const b of $("panels").querySelectorAll("button")) b.disabled = st && b.dataset.k !== "a"; // sin comparación
+  $("panels").closest("label").hidden = state.dual; // con dos variables solo se ve la última salida de cada una
+  $("var2row").hidden = $("filterRow2").hidden = !state.dual;
+  $("varlabel").textContent = state.dual ? "Variable del mapa 1" : "Variable";
+  $("fltlabel").textContent = state.dual ? "Filtro de valores del mapa 1" : "Filtro de valores";
 };
 const panelName = kind => state.cfg?.static ? "Terreno del modelo" : NAME[kind];
 
 let leads = []; // alcances válidos de la última salida para la variable y el desfase elegidos
 
 function refreshLeads(wanted) {
-  leads = validLeads(VARIABLES[$("variable").value], needsB() ? Number($("offset").value) : 0,
-    new Date(runTime()).getUTCHours(), Number($("frames").value));
+  const off = needsB() ? Number($("offset").value) : 0, ch = new Date(runTime()).getUTCHours(), step = Number($("frames").value);
+  if (state.dual) { // solo los alcances en que existen las dos variables (la estática, como el relieve, no limita)
+    const cfgs = [$("variable").value, $("variable2").value].map(k => VARIABLES[k]).filter(c => !c.static);
+    leads = cfgs.length ? cfgs.map(c => validLeads(c, 0, ch, step)).reduce((a, b) => a.filter(h => b.includes(h))) : [0];
+  } else leads = validLeads(VARIABLES[$("variable").value], off, ch, step);
   wanted ??= 24;
   $("lead").max = Math.max(0, leads.length - 1);
   let best = 0; // conserva el alcance pedido o el más cercano que exista
@@ -294,22 +313,28 @@ async function loadStatics(tA, skipOrog) {
   return { orog, land };
 }
 
+// Texto de validez de la variable `cfg` (o del acumulado / máximo del periodo) para el alcance `c.lead`.
+function infoText(cfg, c) {
+  if (cfg.static) return "Relieve del modelo UKV 2 km · no varía con la salida ni con el alcance";
+  if (cfg.accum) { // misma fecha: "de 06Z a 12Z del Sábado 10 de octubre"; si no, las dos con su fecha
+    const t0 = c.tA + (c.lead - cfg.accum.hours) * HOUR, t1 = c.tA + c.lead * HOUR;
+    return `${cfg.accum.title ?? "Acumulado de"} <b>${cfg.accum.hours} h</b> · ` + (sameDay(t0, t1)
+      ? `de ${hourText(t0)} a <b>${hourText(t1)}</b> del ${dayText(t1)} (validez)`
+      : `de ${stampText(t0)} a <b>${stampText(t1)}</b> (validez)`);
+  }
+  return `Validez <b>${stampText(c.tA + c.lead * HOUR)}</b>` + (cfg.fileByLead ? ` · máximo de ${c.lead <= 54 ? "la hora previa" : "las 3 h previas"}` : "");
+}
+const metaFor = (cfg, c) => cfg.static ? { a: { run: "UKV 2 km", fc: "" } } : { a: { run: `salida ${shortStamp(c.tA)}`, fc: fcText(c.tA, c.lead) } };
+
 async function update() {
   const c = readControls();
   const token = ++state.token;
   if (c.lead === undefined) { setStatus("No hay alcances comunes para ese desfase y esos fotogramas."); return; }
-  $("leadLabel").textContent = c.cfg.static ? "no aplica" : fcText(c.tA, c.lead);
-  $("info").innerHTML = c.cfg.static
-    ? "Relieve del modelo UKV 2 km · no varía con la salida ni con el alcance"
-    : c.cfg.accum
-      ? (() => { // misma fecha: "de 06Z a 12Z del Sábado 10 de octubre"; si no, las dos con su fecha
-          const t0 = c.tA + (c.lead - c.cfg.accum.hours) * HOUR, t1 = c.tA + c.lead * HOUR;
-          return `${c.cfg.accum.title ?? "Acumulado de"} <b>${c.cfg.accum.hours} h</b> · ` + (sameDay(t0, t1)
-            ? `de ${hourText(t0)} a <b>${hourText(t1)}</b> del ${dayText(t1)} (validez)`
-            : `de ${stampText(t0)} a <b>${stampText(t1)}</b> (validez)`);
-        })()
-      : `Validez <b>${stampText(c.tA + c.lead * HOUR)}</b>` +
-        (c.cfg.fileByLead ? ` · máximo de ${c.lead <= 54 ? "la hora previa" : "las 3 h previas"}` : "");
+  const dual = state.dual, cfg2 = dual ? VARIABLES[$("variable2").value] : null;
+  $("leadLabel").textContent = isStatic() ? "no aplica" : fcText(c.tA, c.lead);
+  $("info").innerHTML = dual
+    ? `<b>${c.cfg.label}</b>: ${infoText(c.cfg, c)}<br><b>${cfg2.label}</b>: ${infoText(cfg2, c)}`
+    : infoText(c.cfg, c);
   setStatus();
   $("maps").classList.add("loading");
   try {
@@ -317,9 +342,12 @@ async function update() {
     // El relieve y la máscara tierra/mar son iguales en todas las salidas: se descargan una vez por sesión
     // (para los filtros de altitud y superficie y para el tooltip).
     const staticP = loadStatics(c.tA, c.cfg.static);
-    const [SA, SB, st] = await Promise.all([loadSet(c.tA, c.lead, c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null, staticP]);
+    const leadOf = cfg => cfg.static ? 0 : c.lead; // el relieve se lee siempre del alcance 0
+    const [SA, SB, st, S2] = await Promise.all([loadSet(c.tA, leadOf(c.cfg), c.cfg), needB ? loadSet(c.tB, c.leadB, c.cfg) : null, staticP,
+      dual ? loadSet(c.tA, leadOf(cfg2), cfg2) : null]);
     if (token !== state.token) return;
     if (!state.orog) state.orog = c.cfg.static ? SA.main.data : st.orog; // si es la variable "relieve", ya está en SA
+    if (!state.orog && dual && cfg2.static) state.orog = S2.main.data;
     if (!state.land) state.land = st.land;
     rebuildCellMask();
     syncElevUI();
@@ -331,12 +359,16 @@ async function update() {
           b: needB ? { run: `salida ${shortStamp(c.tB)}`, fc: fcText(c.tB, c.leadB) } : null,
           diff: { run: "última − anterior", fc: `validez ${stampText(c.tA + c.lead * HOUR)}` } };
     state.images = {}; state.arrowCache.clear(); state.contourCache = {}; state.marksCache = {}; state.scopeMaskCache = null;
+    if (dual) { // contexto del segundo mapa: se reinician sus cachés (el filtro de valores se conserva)
+      Object.assign(state.sec, { cfg: cfg2, layers: compute(cfg2, S2, null, state.orog), meta: metaFor(cfg2, c),
+        images: {}, arrowCache: new Map(), contourCache: {}, marksCache: {}, shown: { a: true, b: false, diff: false } });
+    }
     drawAll();
     drawStats(c.cfg, state.layers);
     drawArrowKey();
   } catch (e) {
     if (token !== state.token) return;
-    state.layers = null;
+    state.layers = null; state.sec.layers = null;
     for (const p of panels) p.canvas.getContext("2d").clearRect(0, 0, p.canvas.width, p.canvas.height);
     $("stats").innerHTML = ""; $("arrowkey").innerHTML = "";
     setStatus(e.message);
@@ -347,19 +379,21 @@ async function update() {
 
 // ---------- Paneles ----------
 function buildPanels() {
-  const kinds = ["a", "b", "diff"].filter(k => state.shown[k]);
+  // dos variables: dos mapas de la última salida (el segundo con su propio contexto); si no, los que se hayan elegido
+  const specs = state.dual ? [{ kind: "a", ctx: null }, { kind: "a", ctx: state.sec }]
+    : ["a", "b", "diff"].filter(k => state.shown[k]).map(kind => ({ kind, ctx: null }));
   const maps = $("maps");
-  maps.style.setProperty("--cols", kinds.length);
+  maps.style.setProperty("--cols", specs.length);
   maps.innerHTML = "";
-  panels = kinds.map(kind => {
+  panels = specs.map(({ kind, ctx }) => {
     const fig = document.createElement("figure");
     fig.className = "map";
-    fig.innerHTML = '<figcaption></figcaption><canvas></canvas><div class="legend"></div>';
+    fig.innerHTML = '<figcaption></figcaption><canvas></canvas><i class="xh" hidden></i><div class="legend"></div>';
     maps.append(fig);
     const canvas = fig.querySelector("canvas");
     canvas.addEventListener("pointermove", e => onMove(e, canvas, kind));
-    canvas.addEventListener("pointerleave", () => { $("tip").style.display = "none"; });
-    return { kind, canvas, caption: fig.querySelector("figcaption"), legend: fig.querySelector(".legend") };
+    canvas.addEventListener("pointerleave", () => { $("tip").style.display = "none"; for (const q of panels) q.xh.hidden = true; });
+    return { kind, ctx, canvas, xh: fig.querySelector(".xh"), caption: fig.querySelector("figcaption"), legend: fig.querySelector(".legend") };
   });
 }
 
@@ -473,7 +507,7 @@ function rebuildCellMask() {
 const coast = await (await fetch("coast.json")).json();
 
 function drawAll() {
-  for (const p of panels) drawPanel(p);
+  for (const p of panels) withCtx(p.ctx, () => drawPanel(p));
 }
 
 function drawPanel(p) {
@@ -519,7 +553,7 @@ function drawPanel(p) {
   const ft = filterText(), et = elevText();
   const flt = [ft && `${p.kind === "diff" ? "valor en alguna salida" : "valor"} ${ft}`, et].filter(Boolean).join(" · ");
   // línea 1: salida (o "última − anterior"); línea 2: alcance y fecha del pronóstico; línea 3 (reservada): filtros
-  p.caption.innerHTML = `<b>${panelName(p.kind)}</b> <span>· ${meta.run}</span><span class="fc">${meta.fc || "&nbsp;"}</span>` +
+  p.caption.innerHTML = `<b>${state.dual ? cfg.label : panelName(p.kind)}</b> <span>· ${meta.run}</span><span class="fc">${meta.fc || "&nbsp;"}</span>` +
     // línea reservada aunque no haya filtro: así activarlo o quitarlo no desplaza los mapas
     `<span class="flt">${flt ? `solo: ${flt}` : ""}</span>`;
   drawLegend(p, cfg, L, img);
@@ -742,15 +776,20 @@ function drawLegend(p, cfg, layers, img) {
 }
 
 function drawArrowKey() {
-  const el = $("arrowkey"), L = state.layers;
-  if (!L?.wind) { el.innerHTML = ""; return; }
+  const el = $("arrowkey");
+  const html = [null, ...(state.dual ? [state.sec] : [])].map(ctx => withCtx(ctx, arrowKeyHtml)).find(Boolean) ?? "";
+  el.innerHTML = html;
+}
+function arrowKeyHtml() {
+  const L = state.layers;
+  if (!L?.wind) return "";
   const st = arrowStyle(), sw = c => `<b style="background:${c}"></b>`;
   const parts = [
     state.shown.a || state.shown.diff ? `${sw(st.A)} ${NAME.a}` : null,
     L.b && (state.shown.b || state.shown.diff) ? `${sw(st.B)} ${NAME.b}` : null,
   ].filter(Boolean).join(" · ");
   const both = state.shown.diff ? " (en la diferencia se muestran ambas)" : "";
-  el.innerHTML = `Flechas: ${parts}${both} — hacia donde sopla; longitud ∝ velocidad (máx. ${Math.round(ARROWS.vref * (state.cfg.viewFactor ?? 1))} ${state.cfg.viewUnit ?? "m/s"})`;
+  return `Flechas: ${parts}${both} — hacia donde sopla; longitud ∝ velocidad (máx. ${Math.round(ARROWS.vref * (state.cfg.viewFactor ?? 1))} ${state.cfg.viewUnit ?? "m/s"})`;
 }
 
 // `ok(k)` / `okv(k, v)`: ¿la celda k cumple el filtro de altitud y el de valores? `filtered`: hay algún filtro activo.
@@ -820,7 +859,7 @@ function rawTiles(cfg, layers, arr, name, okv, filtered, sc) {
   return tiles;
 }
 
-function drawStats(cfg, layers) {
+function statsTiles(cfg, layers) {
   const m = filterMatcher(), em = state.cellMask, filtered = !!(m || em), tiles = [];
   const { mask: sc, count } = scopeMask(); // las estadísticas cuentan solo las celdas del ámbito
   const okv = (k, v) => (!em || em[k] === 1) && (!m || m(v)); // el mínimo (minValue) lo aplica rawTiles
@@ -829,40 +868,57 @@ function drawStats(cfg, layers) {
   if (state.shown.a) tiles.push(...rawTiles(cfg, layers, layers.a, panelName("a"), okv, filtered, sc));
   if (state.shown.b && layers.b) tiles.push(...rawTiles(cfg, layers, layers.b, panelName("b"), okv, filtered, sc));
   if (state.shown.diff && layers.diff) tiles.push(...diffTiles(cfg, layers, okd, filtered, count));
-  $("stats").innerHTML = `<div class="scope">Estadísticas del ámbito: <b>${scopeLabel()}</b> · ≈ ${(count * 4).toLocaleString("es-ES")} km²</div>` +
-    tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
+  return tiles.map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join("");
+}
+
+function drawStats(cfg, layers) {
+  const { count } = scopeMask();
+  const body = state.dual && state.sec.layers
+    ? [null, state.sec].map(ctx => withCtx(ctx, () => `<div class="scope"><b>${state.cfg.label}</b></div>` + statsTiles(state.cfg, state.layers))).join("")
+    : statsTiles(cfg, layers);
+  $("stats").innerHTML = `<div class="scope">Estadísticas del ámbito: <b>${scopeLabel()}</b> · ≈ ${(count * 4).toLocaleString("es-ES")} km²</div>` + body;
 }
 
 // ---------- Tooltip ----------
 const tip = $("tip");
-function onMove(e, canvas, kind) {
+const muted = t => `<span style="color:var(--muted)">${t}</span>`;
+// Texto del valor de la celda k en el mapa `kind` de la variable activa (en el contexto actual de `state`).
+function valueHtml(kind, k) {
   const { cfg, layers } = state;
-  if (!layers || (kind !== "a" && !layers.b)) return;
-  const g = layers.grid, crop = getCrop(g), r = canvas.getBoundingClientRect();
-  const px = crop.sx + (e.clientX - r.left) / r.width * crop.sw, py = crop.sy + (e.clientY - r.top) / r.height * crop.sh;
-  const i = Math.floor(px), j = g.ny - 1 - Math.floor(py);
-  if (i < 0 || j < 0 || i >= g.nx || j >= g.ny) { tip.style.display = "none"; return; }
-  const k = j * g.nx + i;
   const dec = cfg.decimals, vd = cfg.viewDecimals ?? cfg.decimals, vu = cfg.viewUnit ?? cfg.unit;
-  const muted = t => `<span style="color:var(--muted)">${t}</span>`;
-  let html;
   if (kind !== "diff") {
     // Mapa en bruto: valor absoluto de esa salida (en el viento, velocidad y dirección).
     const arr = kind === "a" ? layers.a : layers.b, dirs = kind === "a" ? layers.dirA : layers.dirB;
-    html = layers.kind === "scalar"
-      ? `${muted(panelName(kind))}<br><b>${arr[k].toFixed(dec)}</b> ${cfg.unit}`
-      : `${muted(`${panelName(kind)} · velocidad y dirección`)}<br><b>${arr[k].toFixed(vd)}</b> ${vu} · <b>${Math.round(dirs[k])}°</b>`;
-  } else {
-    const d = layers.diff[k];
-    const dtxt = Number.isFinite(d) ? `${signed(d, dec)} ${cfg.unit}` : "sin dato (viento flojo)";
-    if (layers.kind === "scalar") {
-      html = `Δ <b>${dtxt}</b><br>Última <b>${layers.a[k].toFixed(dec)}</b> · Anterior <b>${layers.b[k].toFixed(dec)}</b> ${cfg.unit}`;
-    } else {
-      const line = (n, sp, dir) => `${n} <b>${sp.toFixed(vd)}</b> ${vu} · <b>${Math.round(dir)}°</b>`;
-      html = `${layers.kind === "vector" ? "|Δ vector|" : "Δ dirección"} <b>${dtxt}</b><br>${line("Última", layers.a[k], layers.dirA[k])}<br>${line("Anterior", layers.b[k], layers.dirB[k])}`;
-    }
+    return layers.kind === "scalar"
+      ? `${muted(state.dual ? cfg.label : panelName(kind))}<br><b>${arr[k].toFixed(dec)}</b> ${cfg.unit}`
+      : `${muted(`${state.dual ? cfg.label : panelName(kind)} · velocidad y dirección`)}<br><b>${arr[k].toFixed(vd)}</b> ${vu} · <b>${Math.round(dirs[k])}°</b>`;
   }
-  if (state.orog && !cfg.static) {
+  const d = layers.diff[k];
+  const dtxt = Number.isFinite(d) ? `${signed(d, dec)} ${cfg.unit}` : "sin dato (viento flojo)";
+  if (layers.kind === "scalar") return `Δ <b>${dtxt}</b><br>Última <b>${layers.a[k].toFixed(dec)}</b> · Anterior <b>${layers.b[k].toFixed(dec)}</b> ${cfg.unit}`;
+  const line = (n, sp, dir) => `${n} <b>${sp.toFixed(vd)}</b> ${vu} · <b>${Math.round(dir)}°</b>`;
+  return `${layers.kind === "vector" ? "|Δ vector|" : "Δ dirección"} <b>${dtxt}</b><br>${line("Última", layers.a[k], layers.dirA[k])}<br>${line("Anterior", layers.b[k], layers.dirB[k])}`;
+}
+
+function onMove(e, canvas, kind) {
+  const { cfg, layers } = state;
+  if (!layers || (!state.dual && kind !== "a" && !layers.b) || (state.dual && !state.sec.layers)) return;
+  const g = layers.grid, crop = getCrop(g), r = canvas.getBoundingClientRect();
+  const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+  const px = crop.sx + fx * crop.sw, py = crop.sy + fy * crop.sh;
+  const i = Math.floor(px), j = g.ny - 1 - Math.floor(py);
+  if (i < 0 || j < 0 || i >= g.nx || j >= g.ny) { tip.style.display = "none"; return; }
+  const k = j * g.nx + i;
+  // dos variables: el valor de las dos en la celda, y una cruz en el mismo punto de los dos mapas
+  let html = state.dual
+    ? [null, state.sec].map(ctx => withCtx(ctx, () => valueHtml("a", k))).join("<br>")
+    : valueHtml(kind, k);
+  if (state.dual) for (const q of panels) {
+    q.xh.hidden = false;
+    q.xh.style.left = `${q.canvas.offsetLeft + fx * q.canvas.clientWidth}px`;
+    q.xh.style.top = `${q.canvas.offsetTop + fy * q.canvas.clientHeight}px`;
+  }
+  if (state.orog && !(cfg.static && !state.dual)) {
     const sup = state.land ? ` · ${state.land[k] >= 0.5 ? "tierra" : "mar"}` : "";
     html += `<br>${muted(`Terreno ${Math.round(state.orog[k])} m${sup}`)}`;
   }
@@ -873,19 +929,26 @@ function onMove(e, canvas, kind) {
 }
 
 // ---------- Interfaz del filtro ----------
-const currentCfg = () => VARIABLES[$("variable").value];
+// Dos juegos de controles: w = 0 (variable del mapa 1) y w = 1 (variable del mapa 2, solo en el modo de dos variables).
+const FUI = [
+  { op: "fop", v1: "fv1", v2: "fv2", unit: "funit", presets: "fpresets", variable: "variable" },
+  { op: "fop2", v1: "fv1b", v2: "fv2b", unit: "funit2", presets: "fpresets2", variable: "variable2" },
+];
+const cfgOf = w => VARIABLES[$(FUI[w].variable).value];
+const filterOf = w => w ? state.sec.filter : state.filter;
+const setFilterOf = (w, f) => { if (w) state.sec.filter = f; else state.filter = f; };
 
-// Refleja state.filter en los controles: unidad, paso, atajos de la variable y qué entradas están activas.
-function syncFilterUI() {
-  const cfg = currentCfg(), f = state.filter, step = Math.pow(10, -cfg.decimals);
-  $("fop").value = f.op;
-  $("funit").textContent = cfg.viewUnit ?? cfg.unit;
-  for (const [id, v, on] of [["fv1", f.v1, f.op !== "none"], ["fv2", f.v2, f.op === "between"]]) {
+// Refleja el filtro en los controles: unidad, paso, atajos de la variable y qué entradas están activas.
+function syncFilterUI(w = 0) {
+  const ids = FUI[w], cfg = cfgOf(w), f = filterOf(w), step = Math.pow(10, -cfg.decimals);
+  $(ids.op).value = f.op;
+  $(ids.unit).textContent = cfg.viewUnit ?? cfg.unit;
+  for (const [id, v, on] of [[ids.v1, f.v1, f.op !== "none"], [ids.v2, f.v2, f.op === "between"]]) {
     const el = $(id);
     el.disabled = !on; el.step = step;
     el.value = on && Number.isFinite(v) ? v : "";
   }
-  $("fpresets").innerHTML = (cfg.filterPresets ?? []).map((pr, i) => {
+  $(ids.presets).innerHTML = (cfg.filterPresets ?? []).map((pr, i) => {
     const on = f.op === pr.op && f.v1 === pr.v && (pr.op !== "between" || f.v2 === pr.v2);
     return `<button data-i="${i}" aria-pressed="${on}">${pr.label}</button>`;
   }).join("");
@@ -893,34 +956,37 @@ function syncFilterUI() {
 
 // Aplica el filtro: no hay que descargar nada, solo repintar mapas, flechas y estadísticas.
 function applyFilter() {
-  state.images = {}; state.marksCache = {};
+  state.images = {}; state.marksCache = {}; state.sec.images = {}; state.sec.marksCache = {};
   if (!state.layers) return;
   drawAll();
   drawStats(state.cfg, state.layers);
 }
 
 function initFilter() {
-  let timer;
-  $("fop").addEventListener("input", () => {
-    const cfg = currentCfg(), op = $("fop").value, f = state.filter;
-    if (op !== "none" && !Number.isFinite(f.v1)) f.v1 = cfg.filterPresets?.[0]?.v ?? cfg.range[0]; // valor de partida
-    if (op === "between" && !Number.isFinite(f.v2)) f.v2 = Math.max(f.v1 + 1, cfg.range[1]);
-    f.op = op;
-    syncFilterUI(); applyFilter();
-  });
-  for (const id of ["fv1", "fv2"]) {
-    $(id).addEventListener("input", () => {
-      state.filter.v1 = $("fv1").valueAsNumber; state.filter.v2 = $("fv2").valueAsNumber;
-      clearTimeout(timer); timer = setTimeout(() => { applyFilter(); $("fpresets").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", "false")); }, 120);
+  FUI.forEach((ids, w) => {
+    let timer;
+    $(ids.op).addEventListener("input", () => {
+      const cfg = cfgOf(w), op = $(ids.op).value, f = filterOf(w);
+      if (op !== "none" && !Number.isFinite(f.v1)) f.v1 = cfg.filterPresets?.[0]?.v ?? cfg.range[0]; // valor de partida
+      if (op === "between" && !Number.isFinite(f.v2)) f.v2 = Math.max(f.v1 + 1, cfg.range[1]);
+      f.op = op;
+      syncFilterUI(w); applyFilter();
     });
-  }
-  $("fpresets").addEventListener("click", e => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    const pr = currentCfg().filterPresets[Number(b.dataset.i)];
-    const same = state.filter.op === pr.op && state.filter.v1 === pr.v;
-    state.filter = same ? { op: "none", v1: NaN, v2: NaN } : { op: pr.op, v1: pr.v, v2: pr.v2 ?? NaN }; // otro clic lo quita
-    syncFilterUI(); applyFilter();
+    for (const id of [ids.v1, ids.v2]) {
+      $(id).addEventListener("input", () => {
+        const f = filterOf(w);
+        f.v1 = $(ids.v1).valueAsNumber; f.v2 = $(ids.v2).valueAsNumber;
+        clearTimeout(timer); timer = setTimeout(() => { applyFilter(); $(ids.presets).querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", "false")); }, 120);
+      });
+    }
+    $(ids.presets).addEventListener("click", e => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      const pr = cfgOf(w).filterPresets[Number(b.dataset.i)], f = filterOf(w);
+      const same = f.op === pr.op && f.v1 === pr.v;
+      setFilterOf(w, same ? { op: "none", v1: NaN, v2: NaN } : { op: pr.op, v1: pr.v, v2: pr.v2 ?? NaN }); // otro clic lo quita
+      syncFilterUI(w); applyFilter();
+    });
   });
 }
 
@@ -1004,26 +1070,44 @@ function init() {
     `<optgroup label="${g.label}">${Object.entries(VARIABLES).filter(([, v]) => v.group === g.id)
       .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("")}</optgroup>`).join("");
   $("variable").value = DEFAULT_VARIABLE;
+  $("variable2").innerHTML = $("variable").innerHTML; $("variable2").value = "cloud"; // segunda variable del modo de dos variables
   $("region").innerHTML = REGION_GROUPS.map(g =>
     `<optgroup label="${g.label}">${g.regions.map(r => `<option value="${r.id}">${r.label}</option>`).join("")}</optgroup>`).join("");
   $("region").value = DEFAULT_REGION;
   syncControls();
   refreshLeads(24);
   buildPanels();
-  syncFilterUI(); initFilter(); initElev();
+  syncFilterUI(0); syncFilterUI(1); initFilter(); initElev();
   initLayout();
 
   $("variable").addEventListener("input", () => {
     const wasStatic = state.cfg?.static, st = isStatic();
-    if (st) { // el relieve no se compara: solo el mapa en bruto
+    if (st && !state.dual) { // el relieve no se compara: solo el mapa en bruto
       state.shown = { a: true, b: false, diff: false };
       $("panels").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.k === "a"));
       buildPanels();
     }
     const keep = currentLead(); refreshLeads(wasStatic ? 24 : keep); // al volver del relieve, alcance +24 h
     syncControls();
-    state.filter = { op: "none", v1: NaN, v2: NaN }; syncFilterUI(); // otra variable, otra unidad: el filtro de valores se reinicia
+    state.filter = { op: "none", v1: NaN, v2: NaN }; syncFilterUI(0); // otra variable, otra unidad: el filtro de valores se reinicia
     update();
+  });
+  $("variable2").addEventListener("input", () => {
+    refreshLeads(currentLead()); syncControls();
+    state.sec.filter = { op: "none", v1: NaN, v2: NaN }; syncFilterUI(1);
+    update();
+  });
+  // Una variable (con salida anterior y diferencia) o dos variables (última salida de cada una, con filtros independientes)
+  $("modesw").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    const dual = b.dataset.m === "2";
+    if (dual === state.dual) return;
+    state.dual = dual;
+    if (dual) { state.savedShown = { ...state.shown }; state.shown = { a: true, b: false, diff: false }; }
+    else if (state.savedShown) { state.shown = state.savedShown; state.savedShown = null; }
+    $("modesw").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", (x.dataset.m === "2") === dual));
+    $("panels").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", !!state.shown[x.dataset.k]));
+    syncControls(); refreshLeads(currentLead()); buildPanels(); update();
   });
   $("offset").addEventListener("input", () => { refreshLeads(currentLead()); update(); });
   for (const id of ["date", "run"]) $(id).addEventListener("input", () => { refreshLeads(currentLead()); update(); }); // la hora de la salida decide qué alcances caen en validHours
