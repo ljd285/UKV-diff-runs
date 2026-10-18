@@ -1219,6 +1219,89 @@ function initLayout() {
   apply(); // al cambiar el tamaño de #maps, el ResizeObserver repinta los mapas
 }
 
+// ---------- Alcance: pasos, saltos y reproducción ----------
+function moveLead(k) {
+  if ($("lead").disabled || !leads.length) return;
+  setPlaying(false);
+  $("lead").value = Math.min(leads.length - 1, Math.max(0, Number($("lead").value) + k));
+  update();
+}
+// Salta ~`hours` horas (el alcance disponible más cercano) hacia delante o atrás.
+function jumpLead(hours, dir) {
+  if ($("lead").disabled || !leads.length) return;
+  setPlaying(false);
+  const target = currentLead() + dir * hours;
+  let best = 0;
+  leads.forEach((h, i) => { if (Math.abs(h - target) < Math.abs(leads[best] - target)) best = i; });
+  $("lead").value = best;
+  update();
+}
+function setLeadIndex(i) {
+  if ($("lead").disabled || !leads.length) return;
+  setPlaying(false);
+  $("lead").value = i < 0 ? leads.length - 1 : i;
+  update();
+}
+let playing = false;
+async function playLoop() {
+  while (playing) {
+    const i = Number($("lead").value);
+    $("lead").value = i >= leads.length - 1 ? 0 : i + 1; // al llegar al final vuelve al principio
+    await update();
+    if (!playing) break;
+    await new Promise(r => setTimeout(r, 700));
+  }
+}
+function setPlaying(v) {
+  if (v && ($("lead").disabled || leads.length < 2)) v = false;
+  playing = v;
+  $("play").textContent = v ? "⏸" : "⏵";
+  $("play").setAttribute("aria-pressed", v);
+  $("play").title = v ? "Pausar (Espacio)" : "Reproducir los fotogramas (Espacio)";
+  if (v) playLoop();
+}
+
+// ---------- Atajos de teclado ----------
+const SHORTCUTS = [
+  ["← →", "Alcance anterior / siguiente"], ["Mayús + ← →", "Saltar 24 h"], ["Inicio / Fin", "Primer / último alcance"],
+  ["Espacio", "Reproducir / pausar los fotogramas"], ["[  ]", "Variable anterior / siguiente"],
+  ["P", "Mostrar / ocultar el panel de ajustes"], ["1  2", "Una / dos variables"], ["B  D", "Salida anterior / diferencia (modo de una variable)"],
+  ["I", "Isolíneas sí / no"], ["V", "Valores en el mapa: siguiente opción"], ["R", "Restablecer todos los ajustes"], ["?", "Esta ayuda"],
+];
+function initShortcuts() {
+  $("helpList").innerHTML = SHORTCUTS.map(([k, d]) => `<dt>${k.split("  ").map(x => `<kbd>${x}</kbd>`).join(" ")}</dt><dd>${d}</dd>`).join("");
+  $("helpBtn").onclick = () => $("help").showModal();
+  $("helpClose").onclick = () => $("help").close();
+  const click = sel => { const b = document.querySelector(sel); if (b && !b.disabled) b.click(); };
+  const cycle = (id, d) => { // cambia la opción de un selector (agrupado o no) y avisa a sus manejadores
+    const el = $(id), opts = [...el.options].filter(o => !o.disabled), i = opts.findIndex(o => o.value === el.value);
+    el.value = opts[(i + d + opts.length) % opts.length].value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  document.addEventListener("keydown", e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+    const t = e.target, tag = t.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || t.isContentEditable || $("help").open) return; // escribiendo o con la ayuda abierta
+    const onSlider = t.id === "lead"; // el deslizador ya responde a las flechas, Inicio y Fin
+    const key = e.key;
+    let done = true;
+    if (key === "ArrowLeft" || key === "ArrowRight") { if (onSlider) return; if (e.shiftKey) jumpLead(24, key === "ArrowRight" ? 1 : -1); else moveLead(key === "ArrowRight" ? 1 : -1); }
+    else if (key === "Home" || key === "End") { if (onSlider) return; setLeadIndex(key === "Home" ? 0 : -1); }
+    else if (key === " ") { if (tag === "BUTTON" || tag === "SUMMARY") return; setPlaying(!playing); }
+    else if (key === "[" || key === "]") cycle("variable", key === "]" ? 1 : -1);
+    else if (key === "p" || key === "P") click("#toggleCtl");
+    else if (key === "1" || key === "2") click(`#modesw button[data-m="${key}"]`);
+    else if ((key === "b" || key === "B") && !state.dual) click('#panels button[data-k="b"]');
+    else if ((key === "d" || key === "D") && !state.dual) click('#panels button[data-k="diff"]');
+    else if (key === "i" || key === "I") click(`#contoursw button[data-c="${state.contours ? 0 : 1}"]`);
+    else if (key === "v" || key === "V") cycle("marks", 1);
+    else if (key === "r" || key === "R") for (const x of activeList.slice()) x.reset();
+    else if (key === "?") $("help").showModal();
+    else done = false;
+    if (done) e.preventDefault();
+  });
+}
+
 // ---------- Eventos ----------
 function init() {
   const t = defaultCycle(), d = new Date(t);
@@ -1289,12 +1372,16 @@ function init() {
   // El deslizador actualiza la etiqueta al instante y descarga al soltar/pausar, no en cada paso.
   let timer;
   $("lead").addEventListener("input", () => {
+    setPlaying(false);
     $("leadLabel").textContent = fcText(runTime(), currentLead());
     clearTimeout(timer); timer = setTimeout(update, 150);
   });
-  const nudge = k => { $("lead").value = Math.min(leads.length - 1, Math.max(0, Number($("lead").value) + k)); update(); };
-  $("prev").onclick = () => nudge(-1);
-  $("next").onclick = () => nudge(1);
+  $("prev").onclick = () => moveLead(-1);
+  $("next").onclick = () => moveLead(1);
+  $("play").onclick = () => setPlaying(!playing);
+  initShortcuts();
+  // Tras elegir una opción, el selector suelta el foco: así las flechas y demás atajos siguen funcionando sin hacer clic fuera
+  for (const el of document.querySelectorAll("#controls select, #date")) el.addEventListener("change", () => el.blur());
 
   try { state.contours = localStorage.getItem("ukv.contours") === "1"; } catch { /* sin almacenamiento */ }
   const syncContours = () => $("contoursw").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", (b.dataset.c === "1") === state.contours));

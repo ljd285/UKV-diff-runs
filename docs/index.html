@@ -117,6 +117,12 @@
   .active .chip:hover { border-color:var(--accent); }
   .active .chip::after { content:" ✕"; color:var(--muted); }
   .active .reset { border:0; background:none; color:var(--accent); cursor:pointer; padding:2px 4px; font-size:.78rem; text-decoration:underline; }
+  dialog#help { border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); max-width:min(480px, 92vw); }
+  dialog#help::backdrop { background:#0006; }
+  dialog#help h2 { margin:0 0 10px; font-size:1.05rem; }
+  #helpList { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0 0 10px; font-size:.88rem; }
+  #helpList dt { white-space:nowrap; } #helpList dd { margin:0; color:var(--muted); }
+  kbd { border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 6px; font:inherit; font-size:.8rem; background:var(--surface); }
   .stat small { display:block; font-size:.7rem; font-weight:400; color:var(--muted); }
   .stats .scope { grid-column:1 / -1; font-size:.8rem; color:var(--muted); }
   .foot { font-size:.8rem; color:var(--muted); margin-top:14px; }
@@ -130,7 +136,7 @@
       <h1>Visor de datos UKV</h1>
       <p class="sub">Salidas del modelo Met Office UKV 2 km (datos abiertos en AWS). Muestra los datos de una salida y, si quieres, los compara con una salida anterior para la misma hora de validez.</p>
     </div>
-    <div class="layoutsw">Disposición
+    <div class="layoutsw"><button id="helpBtn" title="Atajos de teclado (?)">⌨ Atajos</button> Disposición
       <span class="seg" id="layoutsw" role="group" aria-label="Disposición del panel de ajustes">
         <button data-l="side" aria-pressed="true">Panel a la izquierda</button>
         <button data-l="top" aria-pressed="false">Panel arriba</button>
@@ -283,6 +289,7 @@
         <button id="toggleCtl" aria-expanded="true" aria-controls="controls"></button>
         <button id="prev" aria-label="Alcance anterior">◀</button>
         <button id="next" aria-label="Alcance siguiente">▶</button>
+        <button id="play" aria-label="Reproducir los fotogramas" aria-pressed="false" title="Reproducir los fotogramas (Espacio)">⏵</button>
         <label class="lead">
           <span>Alcance de la última salida: <b id="leadLabel"></b></span>
           <input type="range" id="lead" min="0" max="0" value="0">
@@ -299,6 +306,12 @@
   <p class="foot">Diferencia = última salida − salida anterior (rojo: la última más cálida, azul: más fría). Malla del modelo en proyección Lambert azimutal; los puntos son referencias de ciudades.
   Datos: Met Office, CC BY-SA 4.0, sin garantía. Costa: Natural Earth. <a href="images.html">Visor de imágenes de TWO</a>.</p>
 </main>
+<dialog id="help" aria-label="Atajos de teclado">
+  <h2>Atajos de teclado</h2>
+  <dl id="helpList"></dl>
+  <p class="foot">Los atajos no actúan mientras escribes en un campo o un selector tiene el foco.</p>
+  <button id="helpClose">Cerrar</button>
+</dialog>
 <div id="tip"></div>
 <script type="module" src="app.js"></script>
 </body>
