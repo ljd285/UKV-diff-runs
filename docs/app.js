@@ -8,6 +8,7 @@ import { smoothField, contourLevels, buildContours } from "./contours.js";
 const BASE = "https://met-office-atmospheric-model-data.s3-eu-west-2.amazonaws.com/uk-deterministic-2km";
 const AVAILABLE_AFTER_H = 4.5; // el ciclo completo se termina de subir ~4 h 15 min después de su hora
 const HOUR = 3600e3;
+const DEFAULT_LEAD = 9; // primer fotograma al abrir: +9 h = 12Z con la salida 03Z y 00Z con la 15Z
 const RAD = Math.PI / 180;
 const LANDSEA_FILE = "landsea_mask"; // 1 = tierra, 0 = mar; igual en todas las salidas, como el relieve
 const NAME = { a: "Última salida", b: "Salida anterior", diff: "Diferencia" };
@@ -28,7 +29,8 @@ const signed = (v, dec) => { const t = v.toFixed(dec); return Number(t) === 0 ? 
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 
 // ---------- Colores (rampa continua por tramos) ----------
-const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+// Tema: «auto» sigue al sistema; data-theme="light" / "dark" en <html> lo fuerza (selector «Tema» y tecla T).
+const dark = () => { const t = document.documentElement.dataset.theme; return t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches); };
 function lut(stops) {
   const out = new Uint8ClampedArray(256 * 4);
   for (let i = 0; i < 256; i++) {
@@ -287,7 +289,7 @@ function refreshLeads(wanted) {
   const cfgs = [VARIABLES[$("variable").value], ...(state.dual ? [VARIABLES[$("variable2").value]] : []), ...(ov ? [ov] : []), ...(pc ? [pc] : [])];
   const varying = cfgs.filter(c => !c.static);
   leads = varying.length ? varying.map(c => validLeads(c, off, ch, step)).reduce((a, b) => a.filter(h => b.includes(h))) : [0];
-  wanted ??= 24;
+  wanted ??= DEFAULT_LEAD;
   $("lead").max = Math.max(0, leads.length - 1);
   let best = 0; // conserva el alcance pedido o el más cercano que exista
   leads.forEach((h, i) => { if (Math.abs(h - wanted) < Math.abs(leads[best] - wanted)) best = i; });
@@ -533,6 +535,27 @@ function drawAll() {
 // ---------- Resumen de lo activo ----------
 // Etiquetas con los ajustes que no están por defecto (visibles aunque el panel esté plegado): cada una se quita con un clic,
 // y «Restablecer» quita todas. Los números de las secciones del panel cuentan las etiquetas de cada una.
+// Estado de la vista en la URL (solo lo que no es por defecto, más fecha, salida y alcance): se puede copiar y compartir.
+function syncUrl() {
+  const q = new URLSearchParams(), f = w => { const x = filterOf(w); return describeFilter(w) ? [x.op, x.v1, ...(x.op === "between" ? [x.v2] : [])].join(":") : null; };
+  q.set("d", $("date").value); q.set("r", $("run").value); q.set("v", $("variable").value);
+  if (state.dual) { q.set("m", "2"); q.set("v2", $("variable2").value); }
+  const l = currentLead(); if (l !== undefined && !isStatic()) q.set("l", l);
+  if ($("frames").value !== "1") q.set("f", $("frames").value);
+  if (needsB() && $("offset").value !== "12") q.set("o", $("offset").value);
+  if (!state.dual) { const p = (state.shown.a ? "a" : "") + (state.shown.b ? "b" : "") + (state.shown.diff ? "d" : ""); if (p !== "a") q.set("p", p); }
+  if (state.region !== DEFAULT_REGION) q.set("z", state.region);
+  if (state.contours) { q.set("c", "1"); if (state.ovKey !== "same") q.set("ov", state.ovKey); }
+  if (state.marks !== "none") q.set("mk", state.marks);
+  if (state.scope !== "view") q.set("sc", state.scope);
+  if (f(0)) q.set("fl", f(0));
+  if (state.dual && f(1)) q.set("fl2", f(1));
+  if (state.surface !== "all") q.set("su", state.surface);
+  const { min, max } = state.elev;
+  if (Number.isFinite(min) || Number.isFinite(max)) q.set("el", `${Number.isFinite(min) ? min : ""}:${Number.isFinite(max) ? max : ""}`);
+  try { history.replaceState(null, "", "#" + q.toString()); } catch { /* sin historial (p. ej. iframe) */ }
+}
+
 let activeList = [];
 const SEC_TITLES = { datos: "Datos", vista: "Vista", filtros: "Filtros" };
 function describeFilter(w) {
@@ -566,6 +589,7 @@ function activeItems() {
   return it;
 }
 function renderActive() {
+  syncUrl();
   activeList = activeItems();
   const box = $("active");
   box.hidden = activeList.length === 0;
@@ -1266,7 +1290,7 @@ const SHORTCUTS = [
   ["← →", "Alcance anterior / siguiente"], ["Mayús + ← →", "Saltar 24 h"], ["Inicio / Fin", "Primer / último alcance"],
   ["Espacio", "Reproducir / pausar los fotogramas"], ["[  ]", "Variable anterior / siguiente"],
   ["P", "Mostrar / ocultar el panel de ajustes"], ["1  2", "Una / dos variables"], ["B  D", "Salida anterior / diferencia (modo de una variable)"],
-  ["I", "Isolíneas sí / no"], ["V", "Valores en el mapa: siguiente opción"], ["R", "Restablecer todos los ajustes"], ["?", "Esta ayuda"],
+  ["I", "Isolíneas sí / no"], ["T", "Tema: auto → claro → oscuro"], ["V", "Valores en el mapa: siguiente opción"], ["R", "Restablecer todos los ajustes"], ["?", "Esta ayuda"],
 ];
 function initShortcuts() {
   $("helpList").innerHTML = SHORTCUTS.map(([k, d]) => `<dt>${k.split("  ").map(x => `<kbd>${x}</kbd>`).join(" ")}</dt><dd>${d}</dd>`).join("");
@@ -1295,6 +1319,7 @@ function initShortcuts() {
     else if ((key === "d" || key === "D") && !state.dual) click('#panels button[data-k="diff"]');
     else if (key === "i" || key === "I") click(`#contoursw button[data-c="${state.contours ? 0 : 1}"]`);
     else if (key === "v" || key === "V") cycle("marks", 1);
+    else if (key === "t" || key === "T") cycleTheme();
     else if (key === "r" || key === "R") for (const x of activeList.slice()) x.reset();
     else if (key === "?") $("help").showModal();
     else done = false;
@@ -1318,7 +1343,7 @@ function init() {
     `<optgroup label="${g.label}">${g.regions.map(r => `<option value="${r.id}">${r.label}</option>`).join("")}</optgroup>`).join("");
   $("region").value = DEFAULT_REGION;
   syncControls();
-  refreshLeads(24);
+  refreshLeads(DEFAULT_LEAD);
   buildPanels();
   syncFilterUI(0); syncFilterUI(1); initFilter(); initElev();
   // Secciones plegables del panel: se recuerda cuáles están abiertas; el resumen de lo activo se quita con un clic
@@ -1340,7 +1365,7 @@ function init() {
       $("panels").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.k === "a"));
       buildPanels();
     }
-    const keep = currentLead(); refreshLeads(wasStatic ? 24 : keep); // al volver del relieve, alcance +24 h
+    const keep = currentLead(); refreshLeads(wasStatic ? DEFAULT_LEAD : keep); // al volver del relieve, el alcance por defecto
     syncControls();
     state.filter = { op: "none", v1: NaN, v2: NaN }; syncFilterUI(0); // otra variable, otra unidad: el filtro de valores se reinicia
     update();
@@ -1351,16 +1376,19 @@ function init() {
     update();
   });
   // Una variable (con salida anterior y diferencia) o dos variables (última salida de cada una, con filtros independientes)
-  $("modesw").addEventListener("click", e => {
-    const b = e.target.closest("button"); if (!b) return;
-    const dual = b.dataset.m === "2";
+  const setMode = dual => {
     if (dual === state.dual) return;
     state.dual = dual;
     if (dual) { state.savedShown = { ...state.shown }; state.shown = { a: true, b: false, diff: false }; }
     else if (state.savedShown) { state.shown = state.savedShown; state.savedShown = null; }
     $("modesw").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", (x.dataset.m === "2") === dual));
     $("panels").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", !!state.shown[x.dataset.k]));
-    syncControls(); refreshLeads(currentLead()); buildPanels(); update();
+    syncControls(); refreshLeads(currentLead()); buildPanels();
+  };
+  $("modesw").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if ((b.dataset.m === "2") === state.dual) return;
+    setMode(b.dataset.m === "2"); update();
   });
   $("offset").addEventListener("input", () => { refreshLeads(currentLead()); update(); });
   for (const id of ["date", "run"]) $(id).addEventListener("input", () => { refreshLeads(currentLead()); update(); }); // la hora de la salida decide qué alcances caen en validHours
@@ -1419,6 +1447,64 @@ function init() {
   let raf;
   new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(drawAll); }).observe($("maps"));
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { state.images = {}; drawAll(); });
+
+  // ---- Enlace compartible: el estado de la vista va en la URL (#v=t&d=2026-10-18&r=15&l=24…) ----
+  const syncContours2 = () => $("contoursw").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", (b.dataset.c === "1") === state.contours));
+  // Aplica a los controles el estado de la URL (lo que falte, por defecto: un enlace reproduce la vista, no los ajustes guardados).
+  window.applyUrlState = () => {
+    const q = new URLSearchParams(location.hash.slice(1));
+    if (![...q.keys()].length) return false;
+    const sel = (id, v, def) => { const el = $(id); el.value = [...el.options].some(o => o.value === v) ? v : def; };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(q.get("d") ?? "")) $("date").value = q.get("d");
+    sel("run", q.get("r"), $("run").value);
+    sel("variable", q.get("v"), DEFAULT_VARIABLE); sel("variable2", q.get("v2"), "cloud");
+    setMode(q.get("m") === "2");
+    sel("offset", q.get("o"), "12"); sel("frames", q.get("f"), "1");
+    if (!state.dual) { // mapas a mostrar: letras a (última), b (anterior), d (diferencia)
+      const p = q.get("p") ?? "a";
+      state.shown = { a: p.includes("a"), b: p.includes("b"), diff: p.includes("d") };
+      if (!state.shown.a && !state.shown.b && !state.shown.diff) state.shown.a = true;
+      $("panels").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", !!state.shown[x.dataset.k]));
+    }
+    sel("region", q.get("z"), DEFAULT_REGION); state.region = $("region").value;
+    state.contours = q.get("c") === "1"; syncContours2();
+    sel("ovvar", q.get("ov"), "same"); state.ovKey = $("ovvar").value;
+    sel("marks", q.get("mk"), "none"); state.marks = $("marks").value;
+    sel("scope", q.get("sc"), "view"); state.scope = $("scope").value;
+    const parseFilter = t => { // "lt:0", "gt:20", "between:5:10"
+      const [op, a, b] = (t ?? "").split(":");
+      return ["lt", "gt", "between"].includes(op) && Number.isFinite(Number(a)) && a !== "" ? { op, v1: Number(a), v2: op === "between" && b !== undefined && b !== "" ? Number(b) : NaN } : { op: "none", v1: NaN, v2: NaN };
+    };
+    state.filter = parseFilter(q.get("fl")); state.sec.filter = parseFilter(q.get("fl2"));
+    state.surface = ["land", "sea"].includes(q.get("su")) ? q.get("su") : "all";
+    const [emin, emax] = (q.get("el") ?? ":").split(":").map(x => (x === "" || x === undefined ? NaN : Number(x)));
+    state.elev = { min: emin, max: emax };
+    syncControls(); buildPanels();
+    refreshLeads(q.has("l") ? Number(q.get("l")) : DEFAULT_LEAD);
+    syncFilterUI(0); syncFilterUI(1); syncElevUI();
+    return true;
+  };
+  window.addEventListener("hashchange", () => { if (applyUrlState()) update(); }); // un enlace pegado con la página ya abierta
+  applyUrlState();
+
+  // ---- Tema: Auto / Claro / Oscuro ----
+  const setTheme = t => {
+    if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+    try { localStorage.setItem("ukv.theme", t); } catch { /* sin almacenamiento */ }
+    $("themesw").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === t));
+    state.images = {};
+    if (state.layers) { drawAll(); drawArrowKey(); }
+  };
+  window.cycleTheme = () => { const order = ["auto", "light", "dark"], cur = document.documentElement.dataset.theme ?? "auto"; setTheme(order[(order.indexOf(cur) + 1) % 3]); };
+  $("themesw").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setTheme(b.dataset.t); });
+  $("themesw").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === (document.documentElement.dataset.theme ?? "auto")));
+
+  $("shareBtn").onclick = async () => {
+    syncUrl();
+    const done = txt => { $("shareBtn").textContent = txt; setTimeout(() => { $("shareBtn").textContent = "🔗 Copiar enlace"; }, 1800); };
+    try { await navigator.clipboard.writeText(location.href); done("✔ Enlace copiado"); }
+    catch { window.prompt("Copia este enlace:", location.href); }
+  };
   update();
 }
 init();
