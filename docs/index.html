@@ -4,14 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Visor de datos UKV</title>
+<script>try { const t = localStorage.getItem("ukv.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch { /* sin almacenamiento */ }</script>
 <style>
   :root {
     --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5d6670; --line:#d8dde3; --accent:#256abf;
-    --surface:#f0efec;
+    --surface:#f0efec; --on-accent:#fff;
   }
+  :root { color-scheme:light dark; }
+  /* Tema: automático (el del sistema) o forzado con data-theme="light" / "dark" */
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#14171b; --card:#1d2126; --ink:#e6e9ed; --muted:#98a2ad; --line:#333a42; --accent:#6da7ec; --surface:#1a1a19; }
+    :root:not([data-theme="light"]) { --bg:#14171b; --card:#1d2126; --ink:#e6e9ed; --muted:#98a2ad; --line:#333a42; --accent:#6da7ec; --surface:#1a1a19; --on-accent:#0d1b2e; }
   }
+  :root[data-theme="dark"] { color-scheme:dark; --bg:#14171b; --card:#1d2126; --ink:#e6e9ed; --muted:#98a2ad; --line:#333a42; --accent:#6da7ec; --surface:#1a1a19; --on-accent:#0d1b2e; }
+  :root[data-theme="light"] { color-scheme:light; }
   * { box-sizing:border-box; }
   body { margin:0; padding:12px 16px; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,sans-serif; }
   main { max-width:1900px; margin:0 auto; }
@@ -33,7 +38,7 @@
   #funit { min-width:2.5em; }
   .presets { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .presets button { padding:3px 8px; font-size:.8rem; }
-  .presets button[aria-pressed=true] { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .presets button[aria-pressed=true] { background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
   figure.map figcaption .fc { display:block; color:var(--ink); }
   figure.map figcaption .flt { display:block; color:var(--accent); }
   figure.map figcaption .flt:empty::before { content:"\00a0"; }
@@ -41,7 +46,7 @@
   .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
   .seg button { border:0; border-radius:0; background:var(--bg); }
   .seg button + button { border-left:1px solid var(--line); }
-  .seg button[aria-pressed=true] { background:var(--accent); color:#fff; }
+  .seg button[aria-pressed=true] { background:var(--accent); color:var(--on-accent); }
   .info { font-size:.85rem; color:var(--muted); margin-top:10px; }
   .info b { color:var(--ink); }
   /* Espacio reservado: ni la línea de validez ni los errores desplazan el mapa. */
@@ -111,7 +116,7 @@
   #controls details.sec > summary::-webkit-details-marker { display:none; }
   #controls details.sec > summary::before { content:"▸"; color:var(--muted); width:1em; transition:transform .12s; }
   #controls details.sec[open] > summary::before { transform:rotate(90deg); }
-  .badge { background:var(--accent); color:#fff; border-radius:10px; font-size:.7rem; font-weight:600; padding:1px 7px; }
+  .badge { background:var(--accent); color:var(--on-accent); border-radius:10px; font-size:.7rem; font-weight:600; padding:1px 7px; }
   .active { display:flex; flex-wrap:wrap; gap:6px 6px; align-items:center; font-size:.8rem; color:var(--muted); }
   .active .chip { border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:12px; padding:2px 9px; font-size:.78rem; cursor:pointer; }
   .active .chip:hover { border-color:var(--accent); }
@@ -136,7 +141,15 @@
       <h1>Visor de datos UKV</h1>
       <p class="sub">Salidas del modelo Met Office UKV 2 km (datos abiertos en AWS). Muestra los datos de una salida y, si quieres, los compara con una salida anterior para la misma hora de validez.</p>
     </div>
-    <div class="layoutsw"><button id="helpBtn" title="Atajos de teclado (?)">⌨ Atajos</button> Disposición
+    <div class="layoutsw"><button id="shareBtn" title="Copia un enlace con la variable, la fecha, el alcance, la zona y los ajustes actuales">🔗 Copiar enlace</button>
+      <button id="helpBtn" title="Atajos de teclado (?)">⌨ Atajos</button>
+      Tema
+      <span class="seg" id="themesw" role="group" aria-label="Tema de color">
+        <button data-t="auto" aria-pressed="true">Auto</button>
+        <button data-t="light" aria-pressed="false">Claro</button>
+        <button data-t="dark" aria-pressed="false">Oscuro</button>
+      </span>
+      Disposición
       <span class="seg" id="layoutsw" role="group" aria-label="Disposición del panel de ajustes">
         <button data-l="side" aria-pressed="true">Panel a la izquierda</button>
         <button data-l="top" aria-pressed="false">Panel arriba</button>
