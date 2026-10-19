@@ -412,7 +412,8 @@ function buildPanels() {
     maps.append(fig);
     const canvas = fig.querySelector("canvas");
     canvas.addEventListener("pointermove", e => onMove(e, canvas, kind));
-    canvas.addEventListener("pointerleave", () => { $("tip").style.display = "none"; for (const q of panels) q.xh.hidden = true; });
+    canvas.addEventListener("pointerdown", e => onMove(e, canvas, kind)); // un toque en el móvil también muestra los valores
+    canvas.addEventListener("pointerleave", e => { if (e.pointerType !== "touch") hideTip(); }); // con el dedo, el cuadro queda hasta el siguiente toque fuera
     return { kind, ctx, canvas, xh: fig.querySelector(".xh"), caption: fig.querySelector("figcaption"), legend: fig.querySelector(".legend") };
   });
 }
@@ -1059,6 +1060,7 @@ function drawStats(cfg, layers) {
 }
 
 // ---------- Tooltip ----------
+function hideTip() { $("tip").style.display = "none"; for (const q of panels) q.xh.hidden = true; }
 const tip = $("tip");
 const muted = t => `<span style="color:var(--muted)">${t}</span>`;
 // Texto del valor de la celda k en el mapa `kind` de la variable activa (en el contexto actual de `state`).
@@ -1107,8 +1109,13 @@ function onMove(e, canvas, kind) {
   }
   tip.innerHTML = html;
   tip.style.display = "block";
-  tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
-  tip.style.top = e.clientY + 14 + "px";
+  if (e.pointerType === "touch") { // el dedo tapa lo que hay debajo: el cuadro va encima del punto tocado
+    tip.style.left = Math.max(8, Math.min(e.clientX - 70, innerWidth - tip.offsetWidth - 8)) + "px";
+    tip.style.top = Math.max(8, e.clientY - tip.offsetHeight - 28) + "px";
+  } else {
+    tip.style.left = Math.min(e.clientX + 14, innerWidth - 200) + "px";
+    tip.style.top = e.clientY + 14 + "px";
+  }
 }
 
 // ---------- Interfaz del filtro ----------
@@ -1230,14 +1237,19 @@ function initLayout() {
     set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento: no se recuerda */ } },
   };
   const app = $("app");
-  let layout = store.get("ukv.layout") === "top" ? "top" : "side", collapsed = store.get("ukv.collapsed") === "1";
+  // En pantallas estrechas (móvil) los ajustes son una hoja sobre la barra de tiempo: empieza cerrada y no se recuerda.
+  const narrow = matchMedia("(max-width:700px)");
+  let layout = store.get("ukv.layout") === "top" ? "top" : "side", collapsed = narrow.matches || store.get("ukv.collapsed") === "1";
   const apply = () => {
     app.className = layout + (collapsed ? " collapsed" : "");
     $("layoutsw").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.l === layout));
     $("toggleCtl").setAttribute("aria-expanded", !collapsed);
-    $("toggleCtl").textContent = collapsed ? "☰ Mostrar ajustes" : "✕ Ocultar ajustes";
-    store.set("ukv.layout", layout); store.set("ukv.collapsed", collapsed ? "1" : "0");
+    $("toggleCtl").textContent = narrow.matches ? (collapsed ? "☰ Ajustes" : "✕ Cerrar") : collapsed ? "☰ Mostrar ajustes" : "✕ Ocultar ajustes";
+    store.set("ukv.layout", layout); if (!narrow.matches) store.set("ukv.collapsed", collapsed ? "1" : "0");
   };
+  narrow.addEventListener("change", () => { collapsed = narrow.matches || store.get("ukv.collapsed") === "1"; apply(); });
+  // la hoja de ajustes se apoya en la barra de tiempo, cuya altura varía
+  new ResizeObserver(() => document.documentElement.style.setProperty("--tbh", `${$("timebar").offsetHeight}px`)).observe($("timebar"));
   $("layoutsw").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { layout = b.dataset.l; apply(); } });
   $("toggleCtl").addEventListener("click", () => { collapsed = !collapsed; apply(); });
   apply(); // al cambiar el tamaño de #maps, el ResizeObserver repinta los mapas
@@ -1408,6 +1420,7 @@ function init() {
   $("next").onclick = () => moveLead(1);
   $("play").onclick = () => setPlaying(!playing);
   initShortcuts();
+  document.addEventListener("pointerdown", e => { if (!e.target.closest("#maps canvas")) hideTip(); }); // un toque fuera de los mapas oculta el cuadro de valores
   // Tras elegir una opción, el selector suelta el foco: así las flechas y demás atajos siguen funcionando sin hacer clic fuera
   for (const el of document.querySelectorAll("#controls select, #date")) el.addEventListener("change", () => el.blur());
 
