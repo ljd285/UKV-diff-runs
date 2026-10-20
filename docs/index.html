@@ -9,14 +9,15 @@
   :root {
     --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#5d6670; --line:#d8dde3; --accent:#256abf;
     --surface:#f0efec; --on-accent:#fff;
+    --sec-datos:#256abf; --sec-vista:#2a8a5a; --sec-filtros:#c9780a;
   }
   :root { color-scheme:light dark; }
   /* Tema: automático (el del sistema) o forzado con data-theme="light" / "dark". El oscuro cambia solo el fondo y los paneles (azul marino);
      el contenido de los mapas (paletas, costa, ciudades y el fondo donde no se pinta) no cambia con el tema. */
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#f0efec; --on-accent:#0d1b2e; }
+    :root:not([data-theme="light"]) { --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#f0efec; --on-accent:#0d1b2e; --sec-datos:#6da7ec; --sec-vista:#5cc491; --sec-filtros:#f0a53a; }
   }
-  :root[data-theme="dark"] { color-scheme:dark; --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#f0efec; --on-accent:#0d1b2e; }
+  :root[data-theme="dark"] { color-scheme:dark; --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#f0efec; --on-accent:#0d1b2e; --sec-datos:#6da7ec; --sec-vista:#5cc491; --sec-filtros:#f0a53a; }
   :root[data-theme="light"] { color-scheme:light; }
   * { box-sizing:border-box; }
   body { margin:0; padding:12px 16px; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,sans-serif; }
@@ -111,11 +112,17 @@
   .xh { position:absolute; width:14px; height:14px; margin:-7px 0 0 -7px; border:2px solid #111; border-radius:50%; box-shadow:0 0 0 2px #fff; pointer-events:none; }
   [hidden] { display:none !important; }
   /* Secciones plegables del panel y resumen de lo activo */
-  #controls details.sec { border-top:1px solid var(--line); padding:2px 0 6px; }
-  #controls details.sec:first-of-type { border-top:0; }
-  #controls details.sec > summary { cursor:pointer; font-weight:600; padding:8px 0 6px; list-style:none; display:flex; align-items:center; gap:8px; user-select:none; }
+  /* Cada sección lleva una banda de color (como un resaltado) con su título; el color distingue Datos, Vista y Filtros */
+  #controls details.sec { margin:0 0 10px; --sc:var(--accent); }
+  #controls details.sec[data-sec="datos"] { --sc:var(--sec-datos); }
+  #controls details.sec[data-sec="vista"] { --sc:var(--sec-vista); }
+  #controls details.sec[data-sec="filtros"] { --sc:var(--sec-filtros); }
+  #controls details.sec > summary { cursor:pointer; font-weight:700; padding:7px 10px; margin-bottom:8px; list-style:none; display:flex; align-items:center; gap:8px; user-select:none;
+    background:color-mix(in srgb, var(--sc) 20%, var(--card)); border-left:5px solid var(--sc); border-radius:6px; letter-spacing:.2px; }
+  #controls details.sec > summary:hover { background:color-mix(in srgb, var(--sc) 30%, var(--card)); }
+  #controls details.sec > summary .t { background:linear-gradient(transparent 58%, color-mix(in srgb, var(--sc) 45%, transparent) 58%); padding:0 3px; } /* subrayado tipo marcador bajo el título */
   #controls details.sec > summary::-webkit-details-marker { display:none; }
-  #controls details.sec > summary::before { content:"▸"; color:var(--muted); width:1em; transition:transform .12s; }
+  #controls details.sec > summary::before { content:"▸"; color:var(--sc); width:1em; transition:transform .12s; }
   #controls details.sec[open] > summary::before { transform:rotate(90deg); }
   .badge { background:var(--accent); color:var(--on-accent); border-radius:10px; font-size:.7rem; font-weight:600; padding:1px 7px; }
   .active { display:flex; flex-wrap:wrap; gap:6px 6px; align-items:center; font-size:.8rem; color:var(--muted); }
