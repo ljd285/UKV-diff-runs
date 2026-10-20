@@ -12,11 +12,11 @@
   }
   :root { color-scheme:light dark; }
   /* Tema: automático (el del sistema) o forzado con data-theme="light" / "dark". El oscuro cambia solo el fondo y los paneles (azul marino);
-     los mapas se dibujan igual que en el claro (paletas, costa, ciudades) y su fondo, donde no se pinta, es un gris azulado suave. */
+     el contenido de los mapas (paletas, costa, ciudades y el fondo donde no se pinta) no cambia con el tema. */
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#c4ccdb; --on-accent:#0d1b2e; }
+    :root:not([data-theme="light"]) { --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#f0efec; --on-accent:#0d1b2e; }
   }
-  :root[data-theme="dark"] { color-scheme:dark; --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#c4ccdb; --on-accent:#0d1b2e; }
+  :root[data-theme="dark"] { color-scheme:dark; --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#f0efec; --on-accent:#0d1b2e; }
   :root[data-theme="light"] { color-scheme:light; }
   * { box-sizing:border-box; }
   body { margin:0; padding:12px 16px; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,sans-serif; }
@@ -128,7 +128,7 @@
   dialog#help h2 { margin:0 0 10px; font-size:1.05rem; }
   #helpList { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0 0 10px; font-size:.88rem; }
   #helpList dt { white-space:nowrap; } #helpList dd { margin:0; color:var(--muted); }
-  kbd { border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 6px; font:inherit; font-size:.8rem; background:var(--surface); }
+  kbd { border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 6px; font:inherit; font-size:.8rem; background:var(--bg); }
   figure.map canvas { touch-action:pan-y; } /* en el móvil, arrastrar en vertical desplaza la página y en horizontal muestra los valores */
   @media (pointer:coarse) {
     select, input, button { min-height:38px; }
