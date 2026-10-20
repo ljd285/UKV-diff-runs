@@ -300,3 +300,7 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 - **Cabecera compacta:** sin subtítulo, ni selector de disposición ni botón de atajos (no aplican); quedan «Copiar enlace» y el tema.
 - **Táctil:** un toque (o arrastrar en horizontal) en un mapa muestra el cuadro de valores, **encima del dedo**, y se queda hasta el siguiente toque fuera de los mapas; arrastrar en vertical sigue desplazando la página (`touch-action: pan-y`). Con puntero grueso (`pointer: coarse`) los controles miden ≥ 38–42 px.
 - Probado en Chromium con emulación de móvil (390 × 844, táctil): sin desbordamiento horizontal, barra fija abajo, hoja de ajustes abre/cierra, ▶ avanza, toque en el mapa muestra los valores y un toque fuera los oculta, y modo de dos variables; escritorio sin cambios (resumen de lo activo, secciones y atajos verificados de nuevo).
+
+## Tema oscuro: solo cambia el fondo (20 oct)
+
+- El tema oscuro cambia **solo el fondo de la página y de los paneles**, ahora en **azul marino** (`--bg #0f1a2e`, paneles `#16243b`, líneas `#2a3a58`) en lugar de casi negro. **Los mapas se dibujan igual que en el tema claro**: mismas paletas (se dejan de usar las variantes oscuras), costa, puntos de ciudades, flechas, isolíneas y etiquetas (antes, en oscuro, la costa y los puntos pasaban a blanco). Donde el mapa no se pinta (filtros, valores mínimos) el fondo del lienzo es un gris azulado suave (`#c4ccdb`) para que la costa oscura se siga viendo. Verificado: el brillo medio del mapa es idéntico en claro y oscuro.
