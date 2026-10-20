@@ -308,4 +308,4 @@ Para cambiar una paleta basta editar `palette` de esa variable; para añadir una
 
 ## Secciones del panel destacadas (20 oct)
 
-- Los títulos **Datos, Vista y Filtros** llevan una **banda de color** a todo el ancho (como un resaltado), con una barra gruesa a la izquierda y el título **subrayado tipo marcador**: azul (Datos), verde (Vista) y ámbar (Filtros), con variantes más claras en el tema oscuro (`--sec-*`, `color-mix` sobre el fondo del panel). Al pasar el ratón la banda se intensifica. Sin cambios de comportamiento (siguen plegándose, con el número de ajustes activos).
+- Los títulos **Datos, Vista y Filtros** llevan una **banda de color** a todo el ancho (como un resaltado), con una barra gruesa a la izquierda (sin subrayado bajo el título): azul (Datos), verde (Vista) y ámbar (Filtros), con variantes más claras en el tema oscuro (`--sec-*`, `color-mix` sobre el fondo del panel). Al pasar el ratón la banda se intensifica. Sin cambios de comportamiento (siguen plegándose, con el número de ajustes activos).
