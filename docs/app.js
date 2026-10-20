@@ -29,8 +29,8 @@ const signed = (v, dec) => { const t = v.toFixed(dec); return Number(t) === 0 ? 
 const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 
 // ---------- Colores (rampa continua por tramos) ----------
-// Tema: «auto» sigue al sistema; data-theme="light" / "dark" en <html> lo fuerza (selector «Tema» y tecla T).
-const dark = () => { const t = document.documentElement.dataset.theme; return t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches); };
+// Los mapas (paletas, costa, ciudades, flechas, isolíneas) se dibujan igual en todos los temas: el tema oscuro solo cambia el fondo de la página y de los paneles.
+const dark = () => false;
 function lut(stops) {
   const out = new Uint8ClampedArray(256 * 4);
   for (let i = 0; i < 256; i++) {

@@ -11,11 +11,12 @@
     --surface:#f0efec; --on-accent:#fff;
   }
   :root { color-scheme:light dark; }
-  /* Tema: automático (el del sistema) o forzado con data-theme="light" / "dark" */
+  /* Tema: automático (el del sistema) o forzado con data-theme="light" / "dark". El oscuro cambia solo el fondo y los paneles (azul marino);
+     los mapas se dibujan igual que en el claro (paletas, costa, ciudades) y su fondo, donde no se pinta, es un gris azulado suave. */
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) { --bg:#14171b; --card:#1d2126; --ink:#e6e9ed; --muted:#98a2ad; --line:#333a42; --accent:#6da7ec; --surface:#1a1a19; --on-accent:#0d1b2e; }
+    :root:not([data-theme="light"]) { --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#c4ccdb; --on-accent:#0d1b2e; }
   }
-  :root[data-theme="dark"] { color-scheme:dark; --bg:#14171b; --card:#1d2126; --ink:#e6e9ed; --muted:#98a2ad; --line:#333a42; --accent:#6da7ec; --surface:#1a1a19; --on-accent:#0d1b2e; }
+  :root[data-theme="dark"] { color-scheme:dark; --bg:#0f1a2e; --card:#16243b; --ink:#e3e9f3; --muted:#9aa9c2; --line:#2a3a58; --accent:#6da7ec; --surface:#c4ccdb; --on-accent:#0d1b2e; }
   :root[data-theme="light"] { color-scheme:light; }
   * { box-sizing:border-box; }
   body { margin:0; padding:12px 16px; background:var(--bg); color:var(--ink); font:15px/1.4 system-ui,sans-serif; }
